@@ -25,7 +25,6 @@ from bot.handlers.start import (
     require_region,
 )
 from bot.regions import (
-    TASHKENT,
     application_group,
     clear_application,
     get_region,
@@ -103,15 +102,6 @@ async def _start_application(
     # newly selected application.
     clear_application(context)
     context.user_data["_application_kind"] = kind
-    if kind == "spectre" and region != TASHKENT:
-        # Keep this guard local as well as in require_region: a typed menu
-        # message must not turn Spectre into a Namangan application.
-        await update.effective_message.reply_text(
-            "⚠️ Spectre Energy arizasi faqat WB HUMO Toshkent filialida mavjud.",
-            reply_markup=_regional_keyboard(context),
-        )
-        clear_application(context)
-        return ConversationHandler.END
     if not application_group(region, kind):
         await _destination_error(update, context, kind)
         clear_application(context)
@@ -130,10 +120,9 @@ async def start_spectre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     kind = _kind(context)
     callback = "spectre:check_membership" if kind == "spectre" else "brand:check_membership"
-    allowed_regions = (TASHKENT,) if kind == "spectre" else None
     # The user may have changed branches while the subscription prompt was
     # open.  Validate both branch and destination before collecting data.
-    if not await _require_region(update, context, allowed_regions):
+    if not await _require_region(update, context):
         return ConversationHandler.END
     region = get_region(context)
     if not application_group(region, kind):
@@ -260,8 +249,7 @@ async def brand_get_plate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     display = f"@{user.username}" if user.username else user.full_name
     user_link = f'<a href="tg://user?id={user.id}">{h(display)}</a>'
     kind = _kind(context)
-    allowed_regions = (TASHKENT,) if kind == "spectre" else None
-    if not await _require_region(update, context, allowed_regions):
+    if not await _require_region(update, context):
         return ConversationHandler.END
     region = get_region(context)
     if data.get("_application_region") != region:

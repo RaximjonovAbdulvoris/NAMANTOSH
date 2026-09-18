@@ -4,7 +4,7 @@ from bot.route_settings import destination
 
 NAMANGAN = "namangan"
 TASHKENT = "tashkent"
-REGION_NAMES = {NAMANGAN: "WB HUMO Namangan", TASHKENT: "WB HUMO Toshkent"}
+REGION_NAMES = {TASHKENT: "Toshkent shahri", NAMANGAN: "Namangan shahri"}
 
 
 def get_region(context) -> str | None:
@@ -35,6 +35,8 @@ def driver_groups(region: str) -> list[str]:
 def application_group(region: str, kind: str) -> str:
     if region == NAMANGAN and kind == "brand":
         return BRAND_GROUP
+    if region == NAMANGAN and kind == "spectre":
+        return destination("NAMANGAN_SPECTRE_GROUP")
     if region == TASHKENT and kind in ("brand", "spectre"):
         key = "TASHKENT_BRAND_GROUP" if kind == "brand" else "TASHKENT_SPECTRE_GROUP"
         return destination(key)

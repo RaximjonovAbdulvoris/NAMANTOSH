@@ -63,6 +63,10 @@ class RegionalTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(calls[0].kwargs["reply_markup"].remove_keyboard)
         self.assertEqual(calls[1].args[0], "Qaysi hududda ishlamoqchisiz?")
         buttons = calls[1].kwargs["reply_markup"].inline_keyboard
+        self.assertEqual(
+            [button.text for row in buttons for button in row],
+            ["Toshkent shahri", "Namangan shahri"],
+        )
         nonce = ctx.user_data["region_choice_nonce"]
         self.assertEqual(
             [button.callback_data for row in buttons for button in row],
@@ -92,19 +96,60 @@ class RegionalTests(unittest.IsolatedAsyncioTestCase):
         await start.on_region_choice(callback(f"region:confirm:tashkent:{nonce}"), ctx)
         self.assertIsNone(regions.get_region(ctx))
 
-    async def test_menus_and_namangan_only_handlers(self):
+    async def test_both_city_menus_have_all_sections(self):
         def buttons(region):
             return [button.text for row in start.main_keyboard(region).keyboard for button in row]
-        self.assertIn(start.MENU_CONTACT, buttons("namangan"))
-        self.assertNotIn(start.MENU_SPECTRE, buttons("namangan"))
-        self.assertIn(start.MENU_SPECTRE, buttons("tashkent"))
-        self.assertNotIn(start.MENU_CONTACT, buttons("tashkent"))
-        self.assertNotIn(start.MENU_OFFICE, buttons("tashkent"))
+        for city in ("namangan", "tashkent"):
+            self.assertEqual(buttons(city), [
+                start.MENU_DRIVER, start.MENU_BRAND, start.MENU_SPECTRE,
+                start.MENU_CONTACT, start.MENU_OFFICE, start.MENU_REGION,
+            ])
+            msg = update()
+            await start.show_menu(msg, context(city))
+            text = msg.message.reply_text.call_args.args[0]
+            self.assertNotIn("filial", text)
+            self.assertIn(regions.region_name(city), text)
+            self.assertIn("Spectre Energy", text)
+
+    async def test_tashkent_office_and_contact_are_city_specific(self):
         msg = update()
         await start.show_office(msg, context("tashkent"))
         msg.message.reply_photo.assert_not_awaited()
+        office = msg.message.reply_text.call_args
+        self.assertIn("Toshkent shahri", office.args[0])
+        self.assertIn("Mirzo Ulug‘bek tumani", office.args[0])
+        self.assertIn("Traktorsozlar shaharchasi massivi, 1-mavze, 39-uy", office.args[0])
+        self.assertIn("TTZ diadora", office.args[0])
+        self.assertEqual(office.kwargs["reply_markup"].inline_keyboard[0][0].url,
+                         "https://yandex.uz/maps/-/CTxxiJ5~")
         await start.show_contact(msg, context("tashkent"))
-        self.assertNotIn(start.CONTACT_TEXT, msg.message.reply_text.call_args.args[0])
+        contact = msg.message.reply_text.call_args.args[0]
+        self.assertIn("+998 78 113-80-81", contact)
+        self.assertIn("Toshkent shahri", contact)
+        self.assertNotIn("arizalarnamangan", contact)
+
+    async def test_namangan_office_and_contact_are_preserved(self):
+        msg, ctx = update(), context("namangan")
+        msg.message.reply_photo.return_value = N(photo=[N(file_id="offline-office")])
+        await start.show_office(msg, ctx)
+        office = msg.message.reply_photo.call_args
+        self.assertIn("Namangan shahri", office.kwargs["caption"])
+        self.assertEqual(office.kwargs["reply_markup"].inline_keyboard[0][0].url,
+                         "https://yandex.ru/maps/-/CTtEuSZe")
+        await start.show_office(msg, ctx)
+        self.assertEqual(msg.message.reply_photo.call_args.kwargs["photo"], "offline-office")
+        await start.show_contact(msg, ctx)
+        self.assertIn(start.CONTACT_TEXT, msg.message.reply_text.call_args.args[0])
+
+    async def test_city_confirmation_has_no_branch_wording(self):
+        for city in ("namangan", "tashkent"):
+            ctx = context()
+            await start.start(update(), ctx)
+            msg = callback(f"region:pick:{city}:{ctx.user_data['region_choice_nonce']}")
+            await start.on_region_choice(msg, ctx)
+            text = msg.callback_query.edit_message_text.call_args.args[0]
+            self.assertIn(regions.region_name(city), text)
+            self.assertNotIn("filial", text)
 
     async def test_all_forms_need_confirmed_region(self):
         for handler in (driver.start_driver, brand.start_brand, brand.start_spectre):
@@ -126,10 +171,12 @@ class RegionalTests(unittest.IsolatedAsyncioTestCase):
                 ctx.bot.get_chat_member.assert_not_awaited()
                 self.assertEqual(regions.get_region(ctx), "tashkent")
 
-    async def test_namangan_cannot_enter_spectre(self):
-        ctx = context("namangan")
-        self.assertEqual(await brand.start_spectre(update(), ctx), ConversationHandler.END)
-        ctx.bot.get_chat_member.assert_not_awaited()
+    async def test_namangan_spectre_without_route_does_not_use_other_groups(self):
+        with patch.dict(os.environ, {"NAMANGAN_SPECTRE_GROUP": "", "TASHKENT_SPECTRE_GROUP": "-203"}):
+            ctx = context("namangan")
+            self.assertEqual(await brand.start_spectre(update(), ctx), ConversationHandler.END)
+            ctx.bot.get_chat_member.assert_not_awaited()
+            ctx.bot.send_message.assert_not_awaited()
 
     async def test_shared_membership_gate_fails_closed(self):
         ctx = context("tashkent")
@@ -141,9 +188,10 @@ class RegionalTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_brand_and_spectre_full_question_flow_routes_by_region_and_kind(self):
         destinations = {("namangan", "brand"): "-201", ("tashkent", "brand"): "-202",
-                        ("tashkent", "spectre"): "-203"}
+                        ("tashkent", "spectre"): "-203", ("namangan", "spectre"): "-204"}
         with patch("bot.regions.BRAND_GROUP", "-201"), patch.dict(os.environ, {
             "TASHKENT_BRAND_GROUP": "-202", "TASHKENT_SPECTRE_GROUP": "-203",
+            "NAMANGAN_SPECTRE_GROUP": "-204",
         }):
             for (region, kind), destination in destinations.items():
                 ctx = context(region)

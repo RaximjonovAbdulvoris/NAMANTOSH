@@ -6,7 +6,9 @@ import unittest
 from unittest.mock import patch
 
 from bot.configure import main
-from bot.route_settings import TASHKENT_KEYS, destination, read_settings, settings_path
+from bot.route_settings import (
+    NAMANGAN_KEYS, TASHKENT_KEYS, destination, read_settings, settings_path,
+)
 
 
 class RouteSettingsTests(unittest.TestCase):
@@ -37,6 +39,30 @@ class RouteSettingsTests(unittest.TestCase):
         self.assertEqual(self.configure(), 0)
         with patch.dict(os.environ, {"TASHKENT_BRAND_GROUP": "-999"}):
             self.assertEqual(destination("TASHKENT_BRAND_GROUP"), "-103")
+
+    def test_noninteractive_namangan_spectre_preserves_tashkent_settings(self):
+        self.assertEqual(self.configure(), 0)
+        self.assertEqual(self.run_cli("namangan", "--spectre=-106"), 0)
+        self.assertEqual(destination(NAMANGAN_KEYS["spectre"]), "-106")
+        self.assertEqual(destination(TASHKENT_KEYS["brand"]), "-103")
+        self.assertEqual(len(read_settings()), 6)
+
+    def test_interactive_namangan_prompts_only_for_spectre(self):
+        with patch("builtins.input", side_effect=["-106"]) as prompt:
+            self.assertEqual(self.run_cli("namangan"), 0)
+        prompt.assert_called_once()
+        self.assertEqual(destination("NAMANGAN_SPECTRE_GROUP"), "-106")
+
+    def test_tashkent_configuration_does_not_require_namangan_spectre(self):
+        self.assertEqual(self.configure(), 0)
+        self.assertNotIn(NAMANGAN_KEYS["spectre"], read_settings())
+        self.assertEqual(self.run_cli("check"), 1)
+        self.assertNotIn(
+            "NAMANGAN_SPECTRE_GROUP", settings_path().read_text(encoding="utf-8")
+        )
+
+    def test_scoped_namangan_check_fails_cleanly_when_missing(self):
+        self.assertEqual(self.run_cli("check", "--scope", "namangan"), 1)
 
     def test_update_keeps_other_fields_and_optional_driver_can_be_disabled(self):
         self.configure()

@@ -311,7 +311,7 @@ class OperatorSafetyTests(unittest.IsolatedAsyncioTestCase):
         await operator.on_operator_text_in_group(operator_update, context)
         user_messages = [item for item in bot.sent if item["chat_id"] == 9]
         self.assertEqual(len(user_messages), 1)
-        self.assertIn("WB HUMO Toshkent", user_messages[0]["text"])
+        self.assertIn("Toshkent shahri", user_messages[0]["text"])
         self.assertEqual(
             context.bot_data["operator_message_links"][
                 (104, bot.sent_objects[-1].message_id)

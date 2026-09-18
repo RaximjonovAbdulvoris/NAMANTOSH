@@ -17,7 +17,7 @@ MENU_SPECTRE = "⚡ Spectre Energyga ariza"
 MENU_REGION = "🔄 Hududni almashtirish"
 OFFICE_PHOTO = Path(__file__).resolve().parents[1] / "templates" / "office.png"
 OFFICE_CAPTION = (
-    "📍 <b>WB HUMO Namangan — ofis manzili</b>\n\n"
+    "📍 <b>Namangan shahri — ofis manzili</b>\n\n"
     "Mo‘ljal: Zarkan kordiyalogiya\n"
     "Va Byd namangan yonida\n\n"
     "👇 Manzilni ko‘rish uchun «Xaritada ochish» tugmasini bosing."
@@ -25,14 +25,20 @@ OFFICE_CAPTION = (
 OFFICE_KEYBOARD = InlineKeyboardMarkup([
     [InlineKeyboardButton("📍 Xaritada ochish", url="https://yandex.ru/maps/-/CTtEuSZe")],
 ])
+TASHKENT_OFFICE_TEXT = (
+    "📍 <b>Toshkent shahri — ofis manzili</b>\n\n"
+    "Manzil — Toshkent shahri, Mirzo Ulug‘bek tumani, "
+    "Traktorsozlar shaharchasi massivi, 1-mavze, 39-uy\n\n"
+    "Mo‘ljal: TTZ diadora\n\n"
+    "👇 Manzilni ko‘rish uchun «Xaritada ochish» tugmasini bosing."
+)
+TASHKENT_OFFICE_KEYBOARD = InlineKeyboardMarkup([
+    [InlineKeyboardButton("📍 Xaritada ochish", url="https://yandex.uz/maps/-/CTxxiJ5~")],
+])
 
 def main_keyboard(region: str) -> ReplyKeyboardMarkup:
-    rows = [[MENU_DRIVER], [MENU_BRAND]]
-    if region == TASHKENT:
-        rows.append([MENU_SPECTRE])
-    elif region == NAMANGAN:
-        rows.extend([[MENU_CONTACT], [MENU_OFFICE]])
-    rows.append([MENU_REGION])
+    rows = [[MENU_DRIVER], [MENU_BRAND], [MENU_SPECTRE],
+            [MENU_CONTACT], [MENU_OFFICE], [MENU_REGION]]
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
@@ -40,11 +46,12 @@ def main_keyboard(region: str) -> ReplyKeyboardMarkup:
 MAIN_KEYBOARD = main_keyboard(NAMANGAN)
 
 CONTACT_TEXT = (
-    "📞 Aloqa: +998 78 113-80-81\n"
-    "✈️ Telegram: @humo_Namangan\n"
+    "📞 Aloqa: +998 33 113-80-85 | +998 78 113-80-81\n"
+    "✈️ Telegram: @arizalarnamangan\n"
     "📢 Telegram kanal: @WB_HUMO_TAXI\n"
     '📸 Instagram: <a href="https://www.instagram.com/humo_wb_taxi/">@humo_wb_taxi</a>'
 )
+TASHKENT_CONTACT_TEXT = "📞 Aloqa: +998 78 113-80-81"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.effective_chat.type != "private":
@@ -81,15 +88,13 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return await start(update, context)
     details = (
         "📝 <b>Ulanish uchun ariza</b> — haydovchi sifatida ro‘yxatdan o‘tish.\n"
-        "🎨 <b>Brend ariza</b> — avtomobilni brendlash uchun murojaat."
+        "🎨 <b>Brend ariza</b> — avtomobilni brendlash uchun murojaat.\n"
+        "⚡ <b>Spectre Energyga ariza</b> — avtomobil ma’lumotlarini yuborish.\n"
+        "📞 Aloqa ma’lumotlari va 📍 ofis manzili ham quyidagi menyuda."
     )
-    if region == TASHKENT:
-        details += "\n⚡ <b>Spectre Energyga ariza</b> — avtomobil ma’lumotlarini yuborish."
-    else:
-        details += "\n📞 Aloqa ma’lumotlari va 📍 ofis manzili ham quyidagi menyuda."
     await update.effective_message.reply_text(
         f"📍 <b>{region_name(region)}</b>\n\n"
-        "Arizangiz tanlangan filial operatorlariga yuboriladi.\n\n"
+        "Arizangiz tanlangan shahardagi operatorlarga yuboriladi.\n\n"
         f"{details}\n\nKerakli bo‘limni tanlang:",
         parse_mode="HTML", reply_markup=main_keyboard(region),
     )
@@ -111,8 +116,8 @@ async def on_region_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.answer()
         await query.edit_message_text(
             f"📍 <b>{region_name(region)}</b>\n\n"
-            f"Siz <b>{region_name(region)}</b> filialiga ariza yubormoqchisiz.\n"
-            "Arizangiz faqat shu filial operatorlariga boradi.\n\n"
+            f"Siz <b>{region_name(region)}</b> uchun ariza yubormoqchisiz.\n"
+            "Arizangiz faqat shu shahardagi operatorlarga boradi.\n\n"
             "Tanlovingizni tasdiqlaysizmi?",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
@@ -124,7 +129,7 @@ async def on_region_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         context.user_data.pop("pending_region", None)
         await query.answer()
         await query.edit_message_text(
-            "📍 Qaysi hududga ariza yubormoqchisiz?", reply_markup=_region_choices(nonce),
+            "Qaysi hududda ishlamoqchisiz?", reply_markup=_region_choices(nonce),
         )
     elif action == "confirm" and context.user_data.get("pending_region") == region:
         context.user_data.clear()
@@ -152,7 +157,7 @@ async def require_region(update: Update, context: ContextTypes.DEFAULT_TYPE, all
         return False
     if allowed_regions is not None and region not in allowed_regions:
         await update.effective_message.reply_text(
-            "Bu bo‘lim tanlangan filialda mavjud emas. Quyidagi menyudan tanlang.",
+            "Bu bo‘lim tanlangan shaharda mavjud emas. Quyidagi menyudan tanlang.",
             reply_markup=main_keyboard(region),
         )
         return False
@@ -161,13 +166,15 @@ async def require_region(update: Update, context: ContextTypes.DEFAULT_TYPE, all
 
 
 async def show_contact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not await require_region(update, context, (NAMANGAN,)):
+    if not await require_region(update, context):
         return ConversationHandler.END
     clear_application(context)
+    region = get_region(context)
+    text = TASHKENT_CONTACT_TEXT if region == TASHKENT else CONTACT_TEXT
     await update.message.reply_text(
-        "<b>WB HUMO Namangan — bog‘lanish</b>\n\n" + CONTACT_TEXT,
+        f"<b>{region_name(region)} — bog‘lanish</b>\n\n" + text,
         parse_mode="HTML",
-        reply_markup=MAIN_KEYBOARD,
+        reply_markup=main_keyboard(region),
         disable_web_page_preview=True,
     )
     return ConversationHandler.END
@@ -178,9 +185,16 @@ def build_contact_handler() -> MessageHandler:
 
 
 async def show_office(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not await require_region(update, context, (NAMANGAN,)):
+    if not await require_region(update, context):
         return ConversationHandler.END
     clear_application(context)
+    if get_region(context) == TASHKENT:
+        await update.message.reply_text(
+            TASHKENT_OFFICE_TEXT, parse_mode="HTML",
+            reply_markup=TASHKENT_OFFICE_KEYBOARD,
+            disable_web_page_preview=True,
+        )
+        return ConversationHandler.END
     photo_hash = sha256(OFFICE_PHOTO.read_bytes()).hexdigest()
     cached_photo = context.bot_data.get("office_photo_file_id")
     if cached_photo and context.bot_data.get("office_photo_hash") == photo_hash:

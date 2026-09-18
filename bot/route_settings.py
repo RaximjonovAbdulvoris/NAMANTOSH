@@ -13,6 +13,12 @@ TASHKENT_KEYS = {
     "archive": "TASHKENT_ARCHIVE_GROUP",
 }
 
+NAMANGAN_KEYS = {
+    "spectre": "NAMANGAN_SPECTRE_GROUP",
+}
+
+ROUTE_KEYS = {*TASHKENT_KEYS.values(), *NAMANGAN_KEYS.values()}
+
 
 def settings_path() -> Path:
     directory = os.environ.get("PERSIST_DIR") or str(Path(__file__).resolve().parent.parent)
@@ -20,7 +26,7 @@ def settings_path() -> Path:
 
 
 def validate(key: str, value: str) -> str:
-    if key not in TASHKENT_KEYS.values():
+    if key not in ROUTE_KEYS:
         raise ValueError("Noma'lum guruh sozlamasi.")
     if not isinstance(value, str):
         raise ValueError(f"{key}: ID matn ko'rinishida bo'lishi kerak.")

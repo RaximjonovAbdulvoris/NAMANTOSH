@@ -1,11 +1,12 @@
-"""Run `python -m bot.configure tashkent` in Windows CMD or a Linux terminal."""
+"""Configure local Telegram destination overrides from a terminal."""
 import argparse
 import asyncio
 import logging
 import os
 
 from bot.route_settings import (
-    TASHKENT_KEYS, destination, read_settings, save_settings, settings_path, validate,
+    NAMANGAN_KEYS, TASHKENT_KEYS, destination, read_settings, save_settings,
+    settings_path, validate,
 )
 
 LABELS = {
@@ -17,19 +18,27 @@ LABELS = {
 }
 
 
-async def check_routes() -> int:
+async def check_routes(scope: str = "tashkent") -> int:
     """Read-only Telegram checks; never poll, send applications or reveal tokens."""
     from telegram import Bot
     from telegram.error import InvalidToken, TelegramError
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    routes = {name: destination(key) for name, key in TASHKENT_KEYS.items()}
+    scoped_keys = {
+        "tashkent": TASHKENT_KEYS,
+        "namangan": NAMANGAN_KEYS,
+        "all": {
+            **{f"tashkent_{name}": key for name, key in TASHKENT_KEYS.items()},
+            **{f"namangan_{name}": key for name, key in NAMANGAN_KEYS.items()},
+        },
+    }[scope]
+    routes = {name: destination(key) for name, key in scoped_keys.items()}
     failures = 0
     for name, value in routes.items():
-        if not value and name == "driver2":
+        if not value and name.endswith("driver2"):
             continue
         try:
-            validate(TASHKENT_KEYS[name], value)
+            validate(scoped_keys[name], value)
         except ValueError as exc:
             print(exc)
             failures += 1
@@ -51,16 +60,16 @@ async def check_routes() -> int:
                         raise ValueError("ID guruhga tegishli emas.")
                     if member.status not in ("administrator", "creator"):
                         raise ValueError("Botni guruh administratori qiling.")
-                    if name != "archive" and member.status != "creator" and not getattr(
+                    if not name.endswith("archive") and member.status != "creator" and not getattr(
                         member, "can_delete_messages", False
                     ):
                         raise ValueError("Botga xabarlarni o'chirish ruxsatini bering.")
-                    print(f"{TASHKENT_KEYS[name]}: OK")
+                    print(f"{scoped_keys[name]}: OK")
                 except ValueError as exc:
-                    print(f"{TASHKENT_KEYS[name]}: {exc}")
+                    print(f"{scoped_keys[name]}: {exc}")
                     failures += 1
                 except TelegramError as exc:
-                    print(f"{TASHKENT_KEYS[name]}: {type(exc).__name__}; ID va bot ruxsatlarini tekshiring.")
+                    print(f"{scoped_keys[name]}: {type(exc).__name__}; ID va bot ruxsatlarini tekshiring.")
                     failures += 1
             try:
                 channel_member = await bot.get_chat_member("@WB_HUMO_TAXI", bot.id)
@@ -80,31 +89,40 @@ async def check_routes() -> int:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Toshkent guruhlarini terminaldan sozlash.")
+    parser = argparse.ArgumentParser(description="Guruhlarni terminaldan sozlash.")
     commands = parser.add_subparsers(dest="command", required=True)
     setup = commands.add_parser("tashkent", help="IDlarni kiritish yoki o'zgartirish")
     for name in TASHKENT_KEYS:
         setup.add_argument(f"--{name}", help=LABELS[name])
+    namangan = commands.add_parser(
+        "namangan", help="Namangan Spectre Energy guruhi ID sini kiritish yoki o'zgartirish"
+    )
+    namangan.add_argument("--spectre", help=LABELS["spectre"])
     commands.add_parser("show", help="Amaldagi IDlar va ularning manbasini ko'rish")
-    commands.add_parser("check", help="Token, guruhlar va bot ruxsatlarini tekshirish")
+    check = commands.add_parser("check", help="Token, guruhlar va bot ruxsatlarini tekshirish")
+    check.add_argument(
+        "--scope", choices=("tashkent", "namangan", "all"), default="tashkent",
+        help="Tekshiriladigan shahar (standart: tashkent)",
+    )
     args = parser.parse_args(argv)
     try:
         if args.command == "check":
-            return asyncio.run(check_routes())
+            return asyncio.run(check_routes(args.scope))
         if args.command == "show":
             local = read_settings()
             print(f"Sozlama fayli: {settings_path()}")
-            for name, key in TASHKENT_KEYS.items():
+            for key in (*TASHKENT_KEYS.values(), *NAMANGAN_KEYS.values()):
                 source = "CMD/fayl" if key in local else "muhit"
                 print(f"{key}: {destination(key) or 'sozlanmagan'} ({source})")
             return 0
+        keys = TASHKENT_KEYS if args.command == "tashkent" else NAMANGAN_KEYS
         changes = {
-            key: getattr(args, name) for name, key in TASHKENT_KEYS.items()
+            key: getattr(args, name) for name, key in keys.items()
             if getattr(args, name) is not None
         }
         if not changes:
             print("Mavjud IDni saqlash uchun Enter bosing. Token kiritmang.")
-            for name, key in TASHKENT_KEYS.items():
+            for name, key in keys.items():
                 current = destination(key)
                 answer = input(f"{LABELS[name]} [{current or 'sozlanmagan'}]: ").strip()
                 changes[key] = answer or current
@@ -112,12 +130,12 @@ def main(argv=None) -> int:
             if key == TASHKENT_KEYS["driver2"] and value.lower() == "none":
                 changes[key] = ""
         # Validate the complete effective setup before saving any change.
-        for name, key in TASHKENT_KEYS.items():
+        for name, key in keys.items():
             validate(key, changes.get(key, destination(key)))
         save_settings(changes)
         print(f"Saqlandi: {settings_path()}")
         print("Bu IDlar muhit sozlamalaridan ustun. Bot shu kompyuterda ishlashi kerak.")
-        print("Tekshirish: python -m bot.configure check")
+        print(f"Tekshirish: python -m bot.configure check --scope {args.command}")
         return 0
     except (ValueError, OSError) as exc:
         print(f"Sozlash xatosi: {exc}")
