@@ -128,10 +128,10 @@ class RegionalTests(unittest.IsolatedAsyncioTestCase):
         contact = msg.message.reply_text.call_args.args[0]
         self.assertIn("+998 78 113-80-81", contact)
         self.assertIn("Toshkent shahri", contact)
-        self.assertNotIn("arizalarnamangan", contact)
+        self.assertNotIn("@humo_Namangan", contact)
 
     async def test_city_contacts_share_links_and_single_phone_with_distinct_telegram(self):
-        for city, telegram in (("namangan", "@arizalarnamangan"),
+        for city, telegram in (("namangan", "@humo_Namangan"),
                                ("tashkent", "@wb_taxi_Humo")):
             msg = update()
             await start.show_contact(msg, context(city))
