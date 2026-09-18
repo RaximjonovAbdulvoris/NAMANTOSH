@@ -9,9 +9,10 @@ import logging
 from html import escape as h
 
 from telegram import InputMediaPhoto, InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import CallbackQueryHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from bot.regions import archive_group, region_name
+from bot.brand_cleanup import is_plain_application_message, remove_buttons_command
 
 logger = logging.getLogger(__name__)
 
@@ -504,6 +505,18 @@ async def on_operator_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     op_name = operator.full_name or "Operator"
 
+    # Old form records may have been lost on the external server. The original
+    # bot-authored Spectre/Brand message is enough to disable its stale controls.
+    if is_plain_application_message(query.message, getattr(context.bot, "id", None)):
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            logger.warning("Could not remove untracked plain-application keyboard.")
+        await query.message.reply_text(
+            "Spectre va Brend arizalarida operator tugmalari o‘chirilgan; ariza arxivlanmadi."
+        )
+        return
+
     # A reply's comment-only button is mapped to the original record by the
     # exact message that was sent to this group.
     link_key = context.bot_data.get("operator_message_links", {}).get(
@@ -860,6 +873,9 @@ async def on_user_reply_message(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 def register_operator_handlers(app):
+    app.add_handler(CommandHandler(
+        "tugmasiz", remove_buttons_command, filters=filters.ChatType.GROUPS,
+    ))
     app.add_handler(CallbackQueryHandler(on_operator_button, pattern=r"^op:"))
     app.add_handler(CallbackQueryHandler(on_user_reply_button, pattern=r"^user:reply:"))
     # Do not exclude commands: /bekor must be consumed while a relay is
