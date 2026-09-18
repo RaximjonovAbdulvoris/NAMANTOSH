@@ -47,3 +47,7 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Machine-local Telegram routing (never upload operational group IDs).
+bot_routes.json
+.bot_routes-*.tmp

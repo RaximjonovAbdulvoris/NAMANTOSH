@@ -1,7 +1,6 @@
 """Regional routing. Missing destinations never fall back to another branch."""
-import os
-
 from bot.config import ARCHIVE_GROUP, BRAND_GROUP, DRIVER_GROUPS
+from bot.route_settings import destination
 
 NAMANGAN = "namangan"
 TASHKENT = "tashkent"
@@ -29,7 +28,7 @@ def driver_groups(region: str) -> list[str]:
         return [group for group in DRIVER_GROUPS if group]
     if region == TASHKENT:
         return [value for i in (1, 2)
-                if (value := os.environ.get(f"TASHKENT_DRIVER_GROUP_{i}", "").strip())]
+                if (value := destination(f"TASHKENT_DRIVER_GROUP_{i}"))]
     return []
 
 
@@ -38,7 +37,7 @@ def application_group(region: str, kind: str) -> str:
         return BRAND_GROUP
     if region == TASHKENT and kind in ("brand", "spectre"):
         key = "TASHKENT_BRAND_GROUP" if kind == "brand" else "TASHKENT_SPECTRE_GROUP"
-        return os.environ.get(key, "").strip()
+        return destination(key)
     return ""
 
 
@@ -46,5 +45,5 @@ def archive_group(region: str) -> str:
     if region == NAMANGAN:
         return ARCHIVE_GROUP
     if region == TASHKENT:
-        return os.environ.get("TASHKENT_ARCHIVE_GROUP", "").strip()
+        return destination("TASHKENT_ARCHIVE_GROUP")
     return ""

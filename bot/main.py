@@ -1,7 +1,7 @@
 import logging
 
 from telegram import Update
-from telegram.error import Conflict, NetworkError, TimedOut
+from telegram.error import Conflict, InvalidToken, NetworkError, TimedOut
 from telegram.ext import (
     Application, ApplicationHandlerStop, CallbackQueryHandler, CommandHandler,
     ContextTypes, ConversationHandler, MessageHandler, PicklePersistence, filters,
@@ -154,7 +154,15 @@ def main() -> None:
     app.add_error_handler(on_error)
 
     logger.info("🚖 WB TAXI HUMO bot ishga tushdi...")
-    app.run_polling(allowed_updates=["message", "callback_query"])
+    try:
+        app.run_polling(allowed_updates=["message", "callback_query"])
+    except InvalidToken:
+        # PTB's exception text includes the credential: never print its traceback.
+        logger.error(
+            "Telegram tokenni qabul qilmadi. TELEGRAM_BOT_TOKEN ni xavfsiz "
+            "sozlamada yangilang; tokenni chatga yoki logga yozmang."
+        )
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

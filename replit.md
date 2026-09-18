@@ -56,6 +56,36 @@ Provide numeric Telegram chat IDs (typically starting with `-100`) in:
 - `TASHKENT_ARCHIVE_GROUP` — completed Tashkent applications.
 
 Several application types may intentionally use the same Tashkent group ID.
+
+### Configure Tashkent from Windows CMD / Linux terminal
+
+Run in the project folder on **the same machine/container running the bot**:
+
+```sh
+python -m bot.configure tashkent
+```
+
+This prompts for both driver group IDs, brand, Spectre Energy, and archive.
+Enter keeps an existing value; `none` disables the optional second driver group.
+It works without a bot token for configuration (the token remains environment-only).
+For noninteractive setup, replace the example IDs with real negative group IDs:
+
+```sh
+python -m bot.configure tashkent --driver1=-1001111111111 --driver2=-1002222222222 --brand=-1003333333333 --spectre=-1004444444444 --archive=-1005555555555
+python -m bot.configure show
+python -m bot.configure check
+```
+
+Re-running the command updates IDs. Local overrides take precedence over environment
+variables; absent keys still use environment variables. Changes are read for new
+applications without a restart. Pending applications retain their stored destinations.
+Settings live in `bot_routes.json` under `PERSIST_DIR`, or the project root by default.
+Keep that directory on durable storage. The file is ignored by Git; configuring your
+PC does not configure a bot running on a different server.
+`check` makes read-only Telegram requests to check bot authentication, destination
+access, administrator/deletion permissions, and subscription-channel administration.
+It does not send test applications or start a second polling process.
+
 The bot needs permission to send messages/photos in destination groups and to
 delete originals in operator groups. It must be an admin of the shared
 subscription channel to reliably check membership. Missing destinations block

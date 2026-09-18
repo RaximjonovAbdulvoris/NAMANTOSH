@@ -15,6 +15,10 @@ from bot.regions import archive_group, region_name
 
 logger = logging.getLogger(__name__)
 
+# Process-local only: persistence must never turn an interrupted archive into
+# a permanently locked application after a restart.
+_ARCHIVES_IN_FLIGHT: set[tuple[int, int]] = set()
+
 READY_TEXT = (
     "✅ <b>WB HUMO arizangiz muvaffaqiyatli qabul qilindi!</b>\n\n"
     "📞 Tez orada operatorlarimiz siz bilan bog‘lanishadi."
@@ -196,53 +200,129 @@ def _old_reply_keyboard(group_chat_id: int) -> InlineKeyboardMarkup:
 
 
 async def _archive_application(bot, record: dict, destination: str) -> bool:
-    """Copy each source message independently and remember each success.
+    """Serialize archive attempts for one source application in this process."""
+    key = _application_key(record["group_chat_id"], record["kb_msg_id"])
+    if key in _ARCHIVES_IN_FLIGHT:
+        logger.warning("archive: copy already in progress for %s", key)
+        return False
 
-    ``copy_messages`` can return a deceptively short result.  Individual
-    copies make every successful source id explicit and allow a failed retry
-    without duplicating already archived photos.
+    _ARCHIVES_IN_FLIGHT.add(key)
+    try:
+        return await _archive_application_locked(bot, record, destination)
+    finally:
+        _ARCHIVES_IN_FLIGHT.discard(key)
+
+
+async def _archive_application_locked(bot, record: dict, destination: str) -> bool:
+    """Copy application media as one batch so Telegram preserves its album.
+
+    Telegram may silently skip messages in ``copy_messages``.  A short result
+    is therefore an indeterminate partial copy: it is recorded and never
+    retried automatically (which would duplicate the messages that did copy).
+    The source application remains untouched in that case.
     """
     state = record.setdefault("archive_state", {"photos": {}, "kb": False})
+    # Remove the old persistent guard used by earlier versions.  It may be
+    # stale after a process interruption and is not used for synchronization.
+    state.pop("copying", None)
+
     if state.get("destination") != str(destination):
         state.clear()
-        state.update({"destination": str(destination), "photos": {}, "kb": False})
+        state.update(
+            {
+                "destination": str(destination),
+                "photos": {},
+                "photo_batch": {},
+                "kb": False,
+            }
+        )
+
     copied_photos = state.setdefault("photos", {})
-    failed = False
+    # Bot API copyMessages requires strictly increasing message identifiers.
+    photo_ids = sorted({int(mid) for mid in record.get("photo_msg_ids", [])})
+    expected = {str(mid) for mid in photo_ids}
     source = record["group_chat_id"]
+    failed = False
 
-    for message_id in record.get("photo_msg_ids", []):
-        marker = str(message_id)
-        if copied_photos.get(marker):
-            continue
-        try:
-            copied = await bot.copy_message(
-                chat_id=destination, from_chat_id=source, message_id=message_id
-            )
-            if copied is None:
-                raise RuntimeError("Telegram did not confirm the photo copy")
-            copied_photos[marker] = True
-        except Exception as error:
+    try:
+        pending_ids = [mid for mid in photo_ids if not copied_photos.get(str(mid))]
+        batch = state.setdefault("photo_batch", {})
+        batch_ids = [int(mid) for mid in batch.get("message_ids", [])]
+
+        if batch.get("status") == "partial" and batch_ids == pending_ids:
+            # The API does not identify which source ids were skipped.  Trying
+            # this batch again could duplicate an already archived album.
             failed = True
-            logger.warning("archive: photo %s failed: %s", message_id, error)
-
-    if not state.get("kb"):
-        try:
-            copied = await bot.copy_message(
-                chat_id=destination,
-                from_chat_id=source,
-                message_id=record["kb_msg_id"],
+            logger.warning(
+                "archive: refusing to retry partial photo batch %s (%s/%s copied)",
+                pending_ids,
+                batch.get("copied_count", 0),
+                len(pending_ids),
             )
-            if copied is None:
-                raise RuntimeError("Telegram did not confirm the keyboard copy")
-            state["kb"] = True
-        except Exception as error:
-            failed = True
-            logger.warning("archive: keyboard message failed: %s", error)
+        elif pending_ids:
+            if len(pending_ids) > 100:
+                failed = True
+                logger.warning(
+                    "archive: photo batch has %s messages; Telegram limit is 100",
+                    len(pending_ids),
+                )
+            else:
+                try:
+                    result = await bot.copy_messages(
+                        chat_id=destination,
+                        from_chat_id=source,
+                        message_ids=pending_ids,
+                    )
+                    copied_count = len(result) if result is not None else 0
+                    batch.clear()
+                    batch.update(
+                        {
+                            "message_ids": pending_ids,
+                            "copied_count": copied_count,
+                            "status": (
+                                "complete"
+                                if copied_count == len(pending_ids)
+                                else "partial"
+                            ),
+                        }
+                    )
+                    if copied_count != len(pending_ids):
+                        failed = True
+                        logger.warning(
+                            "archive: Telegram copied only %s/%s photos; "
+                            "automatic retry disabled",
+                            copied_count,
+                            len(pending_ids),
+                        )
+                    else:
+                        for message_id in pending_ids:
+                            copied_photos[str(message_id)] = True
+                except Exception as error:
+                    # No successful result was confirmed, so this batch remains
+                    # retryable on the next click.
+                    failed = True
+                    logger.warning("archive: photo album copy failed: %s", error)
 
-    expected = {str(mid) for mid in record.get("photo_msg_ids", [])}
-    return not failed and expected.issubset(
-        {marker for marker, copied in copied_photos.items() if copied}
-    ) and bool(state.get("kb"))
+        if not state.get("kb"):
+            try:
+                copied = await bot.copy_message(
+                    chat_id=destination,
+                    from_chat_id=source,
+                    message_id=record["kb_msg_id"],
+                )
+                if copied is None:
+                    raise RuntimeError("Telegram did not confirm the keyboard copy")
+                state["kb"] = True
+            except Exception as error:
+                failed = True
+                logger.warning("archive: keyboard message failed: %s", error)
+
+        return not failed and expected.issubset(
+            {marker for marker, copied in copied_photos.items() if copied}
+        ) and bool(state.get("kb"))
+    finally:
+        # Also clean records checkpointed by the pre-transient-lock version.
+        state.pop("copying", None)
 
 
 async def on_operator_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -306,10 +386,20 @@ async def on_operator_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
             return
         if not await _archive_application(context.bot, record, destination):
-            await query.message.reply_text(
-                f"⚠️ {_branch(record)} arxivi to‘liq yuborilmadi, asl ariza "
-                "o‘chirilmadi. Sozlamani tekshirib, «Tayyor»ni qayta bosing."
-            )
+            photo_batch = record.get("archive_state", {}).get("photo_batch", {})
+            if photo_batch.get("status") == "partial":
+                await query.message.reply_text(
+                    f"⚠️ Telegram {_branch(record)} arxiviga ayrim rasmlarni "
+                    "o‘tkazib yubordi. Muvaffaqiyatli nusxalarni takrorlamaslik "
+                    "uchun albom avtomatik qayta yuborilmadi; asl ariza "
+                    "o‘chirilmadi. Administrator arxiv va bot jurnalini "
+                    "tekshirishi kerak."
+                )
+            else:
+                await query.message.reply_text(
+                    f"⚠️ {_branch(record)} arxivi to‘liq yuborilmadi, asl ariza "
+                    "o‘chirilmadi. Sozlamani tekshirib, «Tayyor»ni qayta bosing."
+                )
             return
 
         try:
