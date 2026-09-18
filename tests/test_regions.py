@@ -130,6 +130,21 @@ class RegionalTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Toshkent shahri", contact)
         self.assertNotIn("arizalarnamangan", contact)
 
+    async def test_city_contacts_share_links_and_single_phone_with_distinct_telegram(self):
+        for city, telegram in (("namangan", "@arizalarnamangan"),
+                               ("tashkent", "@wb_taxi_Humo")):
+            msg = update()
+            await start.show_contact(msg, context(city))
+            text = msg.message.reply_text.call_args.args[0]
+            self.assertEqual(text,
+                f"<b>{regions.region_name(city)} — bog‘lanish</b>\n\n"
+                "📞 Aloqa: +998 78 113-80-81\n"
+                f"✈️ Telegram: {telegram}\n"
+                "📢 Telegram kanal: @WB_HUMO_TAXI\n"
+                '📸 Instagram: <a href="https://www.instagram.com/humo_wb_taxi/">@humo_wb_taxi</a>')
+            self.assertNotIn("+998 33 113-80-85", text)
+            self.assertEqual(text.count("+998"), 1)
+
     async def test_office_photo_caches_are_separate_and_refresh_after_image_change(self):
         msg, ctx = update(), context("namangan")
         msg.message.reply_photo.return_value = N(photo=[N(file_id="namangan-photo")])

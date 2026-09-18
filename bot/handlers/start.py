@@ -47,12 +47,12 @@ def main_keyboard(region: str) -> ReplyKeyboardMarkup:
 MAIN_KEYBOARD = main_keyboard(NAMANGAN)
 
 CONTACT_TEXT = (
-    "📞 Aloqa: +998 33 113-80-85 | +998 78 113-80-81\n"
+    "📞 Aloqa: +998 78 113-80-81\n"
     "✈️ Telegram: @arizalarnamangan\n"
     "📢 Telegram kanal: @WB_HUMO_TAXI\n"
     '📸 Instagram: <a href="https://www.instagram.com/humo_wb_taxi/">@humo_wb_taxi</a>'
 )
-TASHKENT_CONTACT_TEXT = "📞 Aloqa: +998 78 113-80-81"
+TASHKENT_CONTACT_TEXT = CONTACT_TEXT.replace("@arizalarnamangan", "@wb_taxi_Humo")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.effective_chat.type != "private":
