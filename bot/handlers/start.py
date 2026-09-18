@@ -40,8 +40,8 @@ def main_keyboard(region: str) -> ReplyKeyboardMarkup:
 MAIN_KEYBOARD = main_keyboard(NAMANGAN)
 
 CONTACT_TEXT = (
-    "📞 Aloqa: +998 78 113-80-81\n"
-    "✈️ Telegram: @humo_Namangan\n"
+    "📞 Aloqa: +998 33 113-80-85 | +998 78 113-80-81\n"
+    "✈️ Telegram: @arizalarnamangan\n"
     "📢 Telegram kanal: @WB_HUMO_TAXI\n"
     '📸 Instagram: <a href="https://www.instagram.com/humo_wb_taxi/">@humo_wb_taxi</a>'
 )
@@ -55,14 +55,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     nonce = uuid4().hex[:10]
     context.user_data["region_choice_nonce"] = nonce
     await update.effective_message.reply_text(
-        "🚖 <b>WB HUMO’ga xush kelibsiz!</b>\n\n"
-        "Haydovchilikka ulanish va avtomobilni brendlash uchun arizani shu yerda yuboring.\n"
-        "Avval murojaat qilmoqchi bo‘lgan filialingizni tanlang.",
+        "• WB HUMO TAXI • xush kelibsiz\n\n"
+        "“WB HUMO TAXI” ga ulanish va avtomobilni brendlash uchun shu botga ariza qoldiring!\n\n"
+        "Avval ishlamoqchi bo’lgan shahringizni tanlang!",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardRemove(),
     )
     await update.effective_message.reply_text(
-        "📍 Qaysi hududga ariza yubormoqchisiz?",
+        "Qaysi hududda ishlamoqchisiz?",
         reply_markup=_region_choices(nonce),
     )
     return ConversationHandler.END

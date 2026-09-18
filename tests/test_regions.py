@@ -50,6 +50,25 @@ def callback(data):
 
 
 class RegionalTests(unittest.IsolatedAsyncioTestCase):
+    async def test_start_welcome_text_and_region_buttons(self):
+        ctx = context()
+        msg = update("/start")
+        await start.start(msg, ctx)
+        calls = msg.effective_message.reply_text.await_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0].args[0],
+            "• WB HUMO TAXI • xush kelibsiz\n\n"
+            "“WB HUMO TAXI” ga ulanish va avtomobilni brendlash uchun shu botga ariza qoldiring!\n\n"
+            "Avval ishlamoqchi bo’lgan shahringizni tanlang!")
+        self.assertTrue(calls[0].kwargs["reply_markup"].remove_keyboard)
+        self.assertEqual(calls[1].args[0], "Qaysi hududda ishlamoqchisiz?")
+        buttons = calls[1].kwargs["reply_markup"].inline_keyboard
+        nonce = ctx.user_data["region_choice_nonce"]
+        self.assertEqual(
+            [button.callback_data for row in buttons for button in row],
+            [f"region:pick:{region}:{nonce}" for region in regions.REGION_NAMES],
+        )
+
     async def test_region_must_be_confirmed_and_old_buttons_cannot_change_it(self):
         ctx = context()
         await start.start(update(), ctx)
