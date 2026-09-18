@@ -594,9 +594,11 @@ async def _send_to_driver_group(context: ContextTypes.DEFAULT_TYPE):
     selfie_album_ids = [d.get("selfie"), d.get("litsenziya")]
     selfie_album_ids = [pid for pid in selfie_album_ids if pid]
 
-    # photo_msg_ids — album messages (copied as-is to archive)
-    # kb_msg_id    — info/keyboard message (copied separately without keyboard)
+    # photo_msg_ids retain source deletion compatibility; media_albums below
+    # retain reusable file ids, captions, and the two album boundaries.
+    # kb_msg_id is copied separately without its inline keyboard.
     photo_msg_ids: list[int] = []
+    media_albums: list[dict] = []
 
     if main_album_ids:
         main_media = [
@@ -608,7 +610,22 @@ async def _send_to_driver_group(context: ContextTypes.DEFAULT_TYPE):
             for i, fid in enumerate(main_album_ids)
         ]
         main_sent = await context.bot.send_media_group(chat_id=chat_id, media=main_media)
-        photo_msg_ids.extend(m.message_id for m in main_sent)
+        main_message_ids = [m.message_id for m in main_sent]
+        photo_msg_ids.extend(main_message_ids)
+        media_albums.append(
+            {
+                "name": "main",
+                "source_message_ids": main_message_ids,
+                "photos": [
+                    {
+                        "file_id": fid,
+                        "caption": caption_main if i == 0 else None,
+                        "parse_mode": ParseMode.HTML if i == 0 else None,
+                    }
+                    for i, fid in enumerate(main_album_ids)
+                ],
+            }
+        )
 
     if selfie_album_ids:
         selfie_media = [
@@ -620,7 +637,22 @@ async def _send_to_driver_group(context: ContextTypes.DEFAULT_TYPE):
             for i, fid in enumerate(selfie_album_ids)
         ]
         selfie_sent = await context.bot.send_media_group(chat_id=chat_id, media=selfie_media)
-        photo_msg_ids.extend(m.message_id for m in selfie_sent)
+        selfie_message_ids = [m.message_id for m in selfie_sent]
+        photo_msg_ids.extend(selfie_message_ids)
+        media_albums.append(
+            {
+                "name": "selfie",
+                "source_message_ids": selfie_message_ids,
+                "photos": [
+                    {
+                        "file_id": fid,
+                        "caption": caption_selfie if i == 0 else None,
+                        "parse_mode": ParseMode.HTML if i == 0 else None,
+                    }
+                    for i, fid in enumerate(selfie_album_ids)
+                ],
+            }
+        )
 
     if user_id:
         # Clear old progress state so new application shows fresh 🔴 button
@@ -653,6 +685,7 @@ async def _send_to_driver_group(context: ContextTypes.DEFAULT_TYPE):
             kb_msg_id=kb_msg.message_id,
             applicant_name=d.get("name") or full_name or "Arizachi",
             username=username,
+            media_albums=media_albums,
         )
 
     logger.info("[driver] sent application to group #%s (%s)", idx + 1, chat_id)

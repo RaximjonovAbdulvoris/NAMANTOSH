@@ -8,7 +8,7 @@ same time.
 import logging
 from html import escape as h
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InputMediaPhoto, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 from bot.regions import archive_group, region_name
@@ -74,6 +74,7 @@ def register_application(
     kb_msg_id: int,
     applicant_name: str = "",
     username: str = "",
+    media_albums: list[dict] | None = None,
 ):
     """Register a form application and return its stable record key.
 
@@ -94,6 +95,10 @@ def register_application(
         "username": username or "",
         "archive_state": {"photos": {}, "kb": False},
     }
+    if media_albums is not None:
+        # File ids are deliberately persisted at submission time.  Telegram
+        # message ids cannot be converted back into reusable file ids later.
+        record["media_albums"] = media_albums
     context.bot_data.setdefault("applications", {})[key] = record
     # This alias is useful while the old driver worker is being migrated.  It
     # is still resolved only after source chat and keyboard id are checked.
@@ -201,6 +206,9 @@ def _old_reply_keyboard(group_chat_id: int) -> InlineKeyboardMarkup:
 
 async def _archive_application(bot, record: dict, destination: str) -> bool:
     """Serialize archive attempts for one source application in this process."""
+    if record.get("kind") == "brand":
+        logger.warning("archive: refusing brand application")
+        return False
     key = _application_key(record["group_chat_id"], record["kb_msg_id"])
     if key in _ARCHIVES_IN_FLIGHT:
         logger.warning("archive: copy already in progress for %s", key)
@@ -245,6 +253,12 @@ async def _archive_application_locked(bot, record: dict, destination: str) -> bo
     failed = False
 
     try:
+        media_albums = record.get("media_albums")
+        if media_albums is not None:
+            return await _archive_reconstructed_albums(
+                bot, record, destination, state, media_albums
+            )
+
         pending_ids = [mid for mid in photo_ids if not copied_photos.get(str(mid))]
         batch = state.setdefault("photo_batch", {})
         batch_ids = [int(mid) for mid in batch.get("message_ids", [])]
@@ -325,6 +339,151 @@ async def _archive_application_locked(bot, record: dict, destination: str) -> bo
         state.pop("copying", None)
 
 
+def _album_chunks(items: list[dict]) -> list[list[dict]]:
+    """Split at Telegram's limit without creating an avoidable singleton."""
+    chunks = []
+    remaining = list(items)
+    while remaining:
+        size = min(10, len(remaining))
+        if len(remaining) > 10 and len(remaining) - size == 1:
+            size -= 1
+        chunks.append(remaining[:size])
+        remaining = remaining[size:]
+    return chunks
+
+
+async def _archive_reconstructed_albums(
+    bot, record: dict, destination: str, state: dict, media_albums
+) -> bool:
+    """Re-send new records from reusable file ids, preserving album boundaries."""
+    album_state = state.setdefault("albums", {})
+    failed = False
+    expected_chunks = []
+
+    if not isinstance(media_albums, list):
+        return False
+
+    # Never delete a source photo that is absent from the reconstruction plan.
+    try:
+        source_ids = []
+        for album in media_albums:
+            if not isinstance(album, dict) or not isinstance(album.get("photos"), list):
+                return False
+            ids = album.get("source_message_ids", [])
+            if len(ids) != len(album["photos"]):
+                return False
+            source_ids.extend(int(mid) for mid in ids)
+        if (
+            len(source_ids) != len(set(source_ids))
+            or set(source_ids) != {int(mid) for mid in record.get("photo_msg_ids", [])}
+        ):
+            logger.warning("archive: album metadata does not cover every source photo")
+            return False
+    except (TypeError, ValueError):
+        return False
+
+    for album_index, album in enumerate(media_albums):
+        if not isinstance(album, dict) or not isinstance(album.get("photos"), list):
+            failed = True
+            continue
+        photos = album["photos"]
+        if not photos:
+            failed = True
+            continue
+        for chunk_index, chunk in enumerate(_album_chunks(photos)):
+            marker = f"{album_index}:{chunk_index}"
+            expected_chunks.append(marker)
+            checkpoint = album_state.setdefault(marker, {})
+            if checkpoint.get("status") == "complete":
+                continue
+            if checkpoint.get("status") == "indeterminate":
+                # Telegram may already have accepted this send.  Retrying could
+                # duplicate it, so require manual intervention.
+                failed = True
+                continue
+
+            if any(
+                not isinstance(item, dict) or not item.get("file_id")
+                for item in chunk
+            ):
+                checkpoint.update(status="indeterminate", reason="missing_file_id")
+                failed = True
+                continue
+
+            try:
+                if len(chunk) == 1:
+                    item = chunk[0]
+                    sent = await bot.send_photo(
+                        chat_id=destination,
+                        photo=item["file_id"],
+                        caption=item.get("caption"),
+                        parse_mode=item.get("parse_mode"),
+                    )
+                    if sent is None:
+                        raise RuntimeError("Telegram did not confirm photo send")
+                else:
+                    media = [
+                        InputMediaPhoto(
+                            media=item["file_id"],
+                            caption=item.get("caption"),
+                            parse_mode=item.get("parse_mode"),
+                        )
+                        for item in chunk
+                    ]
+                    sent = await bot.send_media_group(
+                        chat_id=destination, media=media
+                    )
+                    sent = list(sent or [])
+                    group_ids = {
+                        getattr(message, "media_group_id", None) for message in sent
+                    }
+                    if (
+                        len(sent) != len(chunk)
+                        or len(group_ids) != 1
+                        or not next(iter(group_ids), None)
+                    ):
+                        checkpoint.update(
+                            status="indeterminate",
+                            confirmed_count=len(sent),
+                            expected_count=len(chunk),
+                        )
+                        failed = True
+                        continue
+                checkpoint.clear()
+                checkpoint["status"] = "complete"
+            except Exception as error:
+                # Exceptions have no successful Bot API response and remain
+                # retryable.  A malformed successful response above does not.
+                failed = True
+                logger.warning(
+                    "archive: reconstructed album %s failed: %s", marker, error
+                )
+
+    if not state.get("kb"):
+        try:
+            copied = await bot.copy_message(
+                chat_id=destination,
+                from_chat_id=record["group_chat_id"],
+                message_id=record["kb_msg_id"],
+            )
+            if copied is None:
+                raise RuntimeError("Telegram did not confirm the keyboard copy")
+            state["kb"] = True
+        except Exception as error:
+            failed = True
+            logger.warning("archive: keyboard message failed: %s", error)
+
+    return (
+        not failed
+        and bool(expected_chunks)
+        and all(
+            album_state.get(marker, {}).get("status") == "complete"
+            for marker in expected_chunks
+        )
+        and bool(state.get("kb"))
+    )
+
+
 async def on_operator_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query or not query.data or not query.message:
@@ -360,6 +519,16 @@ async def on_operator_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ):
             resolved = (link_key, record)
 
+    if resolved is not None and resolved[1].get("kind") == "brand":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception as error:
+            logger.warning("brand callback: could not remove old keyboard: %s", error)
+        await query.message.reply_text(
+            "⚠️ Brend arizalari bu tugmalar orqali arxivlanmaydi."
+        )
+        return
+
     if action in ("ready", "progress") and resolved is None:
         await query.message.reply_text(
             "⚠️ Bu tugma boshqa yoki eski arizaga tegishli. Ariza o‘zgartirilmadi."
@@ -386,11 +555,16 @@ async def on_operator_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
             return
         if not await _archive_application(context.bot, record, destination):
-            photo_batch = record.get("archive_state", {}).get("photo_batch", {})
-            if photo_batch.get("status") == "partial":
+            archive_state = record.get("archive_state", {})
+            photo_batch = archive_state.get("photo_batch", {})
+            uncertain_album = any(
+                checkpoint.get("status") == "indeterminate"
+                for checkpoint in archive_state.get("albums", {}).values()
+            )
+            if photo_batch.get("status") == "partial" or uncertain_album:
                 await query.message.reply_text(
-                    f"⚠️ Telegram {_branch(record)} arxiviga ayrim rasmlarni "
-                    "o‘tkazib yubordi. Muvaffaqiyatli nusxalarni takrorlamaslik "
+                    f"⚠️ {_branch(record)} arxiviga barcha rasmlar to‘liq "
+                    "o‘tgani tasdiqlanmadi. Muvaffaqiyatli nusxalarni takrorlamaslik "
                     "uchun albom avtomatik qayta yuborilmadi; asl ariza "
                     "o‘chirilmadi. Administrator arxiv va bot jurnalini "
                     "tekshirishi kerak."

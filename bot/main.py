@@ -9,6 +9,7 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 from bot.config import BOT_TOKEN
+from bot.brand_cleanup import remove_legacy_brand_keyboards
 from bot.handlers.brand import build_brand_conversation
 from bot.handlers.driver import build_driver_conversation
 from bot.handlers.operator import on_user_reply_message, register_operator_handlers
@@ -121,6 +122,11 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         pass
 
 
+async def post_init(application) -> None:
+    await remove_legacy_brand_keyboards(application)
+    await warmup_templates(application)
+
+
 def main() -> None:
     request = HTTPXRequest(
         connection_pool_size=20,
@@ -146,7 +152,7 @@ def main() -> None:
         .persistence(persistence)
         .request(request)
         .get_updates_request(get_updates_request)
-        .post_init(warmup_templates)
+        .post_init(post_init)
         .build()
     )
 
