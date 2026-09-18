@@ -16,6 +16,7 @@ MENU_OFFICE = "📍 Ofis manzili"
 MENU_SPECTRE = "⚡ Spectre Energyga ariza"
 MENU_REGION = "🔄 Hududni almashtirish"
 OFFICE_PHOTO = Path(__file__).resolve().parents[1] / "templates" / "office.png"
+TASHKENT_OFFICE_PHOTO = OFFICE_PHOTO.with_name("office_tashkent.png")
 OFFICE_CAPTION = (
     "📍 <b>Namangan shahri — ofis manzili</b>\n\n"
     "Mo‘ljal: Zarkan kordiyalogiya\n"
@@ -189,28 +190,29 @@ async def show_office(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return ConversationHandler.END
     clear_application(context)
     if get_region(context) == TASHKENT:
-        await update.message.reply_text(
-            TASHKENT_OFFICE_TEXT, parse_mode="HTML",
-            reply_markup=TASHKENT_OFFICE_KEYBOARD,
-            disable_web_page_preview=True,
+        photo_path, caption, keyboard = (
+            TASHKENT_OFFICE_PHOTO, TASHKENT_OFFICE_TEXT, TASHKENT_OFFICE_KEYBOARD,
         )
-        return ConversationHandler.END
-    photo_hash = sha256(OFFICE_PHOTO.read_bytes()).hexdigest()
-    cached_photo = context.bot_data.get("office_photo_file_id")
-    if cached_photo and context.bot_data.get("office_photo_hash") == photo_hash:
+        cache_key = "tashkent_office_photo"
+    else:
+        photo_path, caption, keyboard = OFFICE_PHOTO, OFFICE_CAPTION, OFFICE_KEYBOARD
+        cache_key = "office_photo"
+    photo_hash = sha256(photo_path.read_bytes()).hexdigest()
+    cached_photo = context.bot_data.get(f"{cache_key}_file_id")
+    if cached_photo and context.bot_data.get(f"{cache_key}_hash") == photo_hash:
         await update.message.reply_photo(
-            photo=cached_photo, caption=OFFICE_CAPTION,
-            parse_mode="HTML", reply_markup=OFFICE_KEYBOARD,
+            photo=cached_photo, caption=caption,
+            parse_mode="HTML", reply_markup=keyboard,
         )
     else:
-        with OFFICE_PHOTO.open("rb") as photo:
+        with photo_path.open("rb") as photo:
             sent = await update.message.reply_photo(
-                photo=photo, caption=OFFICE_CAPTION,
-                parse_mode="HTML", reply_markup=OFFICE_KEYBOARD,
+                photo=photo, caption=caption,
+                parse_mode="HTML", reply_markup=keyboard,
             )
         if sent.photo:
-            context.bot_data["office_photo_file_id"] = sent.photo[-1].file_id
-            context.bot_data["office_photo_hash"] = photo_hash
+            context.bot_data[f"{cache_key}_file_id"] = sent.photo[-1].file_id
+            context.bot_data[f"{cache_key}_hash"] = photo_hash
     return ConversationHandler.END
 
 

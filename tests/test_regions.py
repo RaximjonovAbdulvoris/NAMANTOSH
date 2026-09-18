@@ -113,13 +113,15 @@ class RegionalTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tashkent_office_and_contact_are_city_specific(self):
         msg = update()
+        msg.message.reply_photo.return_value = N(photo=[N(file_id="tashkent-office")])
         await start.show_office(msg, context("tashkent"))
-        msg.message.reply_photo.assert_not_awaited()
-        office = msg.message.reply_text.call_args
-        self.assertIn("Toshkent shahri", office.args[0])
-        self.assertIn("Mirzo Ulug‘bek tumani", office.args[0])
-        self.assertIn("Traktorsozlar shaharchasi massivi, 1-mavze, 39-uy", office.args[0])
-        self.assertIn("TTZ diadora", office.args[0])
+        msg.message.reply_text.assert_not_awaited()
+        office = msg.message.reply_photo.call_args
+        self.assertEqual(office.kwargs["photo"].name, str(start.TASHKENT_OFFICE_PHOTO))
+        self.assertIn("Toshkent shahri", office.kwargs["caption"])
+        self.assertIn("Mirzo Ulug‘bek tumani", office.kwargs["caption"])
+        self.assertIn("Traktorsozlar shaharchasi massivi, 1-mavze, 39-uy", office.kwargs["caption"])
+        self.assertIn("TTZ diadora", office.kwargs["caption"])
         self.assertEqual(office.kwargs["reply_markup"].inline_keyboard[0][0].url,
                          "https://yandex.uz/maps/-/CTxxiJ5~")
         await start.show_contact(msg, context("tashkent"))
@@ -127,6 +129,26 @@ class RegionalTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("+998 78 113-80-81", contact)
         self.assertIn("Toshkent shahri", contact)
         self.assertNotIn("arizalarnamangan", contact)
+
+    async def test_office_photo_caches_are_separate_and_refresh_after_image_change(self):
+        msg, ctx = update(), context("namangan")
+        msg.message.reply_photo.return_value = N(photo=[N(file_id="namangan-photo")])
+        await start.show_office(msg, ctx)
+        ctx.user_data["region"] = "tashkent"
+        msg.message.reply_photo.return_value = N(photo=[N(file_id="tashkent-photo")])
+        await start.show_office(msg, ctx)
+        self.assertEqual(msg.message.reply_photo.call_args.kwargs["photo"].name,
+                         str(start.TASHKENT_OFFICE_PHOTO))
+        self.assertEqual(ctx.bot_data["office_photo_file_id"], "namangan-photo")
+        await start.show_office(msg, ctx)
+        self.assertEqual(msg.message.reply_photo.call_args.kwargs["photo"], "tashkent-photo")
+        ctx.bot_data["tashkent_office_photo_hash"] = "outdated-image-hash"
+        await start.show_office(msg, ctx)
+        self.assertEqual(msg.message.reply_photo.call_args.kwargs["photo"].name,
+                         str(start.TASHKENT_OFFICE_PHOTO))
+        ctx.user_data["region"] = "namangan"
+        await start.show_office(msg, ctx)
+        self.assertEqual(msg.message.reply_photo.call_args.kwargs["photo"], "namangan-photo")
 
     async def test_namangan_office_and_contact_are_preserved(self):
         msg, ctx = update(), context("namangan")
