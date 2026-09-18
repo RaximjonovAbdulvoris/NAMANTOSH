@@ -1,5 +1,6 @@
 import os
 import unittest
+from itertools import product
 from types import SimpleNamespace
 
 for _key, _value in {
@@ -194,15 +195,15 @@ class ArchiveAlbumTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.bot.groups, [])
         self.assertEqual(context.bot.copies, [])
 
-    async def test_brand_legacy_callbacks_are_harmless(self):
-        for action in ("ready", "progress", "comment"):
-            with self.subTest(action=action):
+    async def test_brand_and_spectre_legacy_callbacks_are_harmless(self):
+        for kind, action in product(("brand", "spectre"), ("ready", "progress", "comment")):
+            with self.subTest(kind=kind, action=action):
                 bot = Bot()
                 context = self.context(bot)
                 context.bot_data["app_messages"] = {
                     9: {
                         "applicant_id": 9,
-                        "kind": "brand",
+                        "kind": kind,
                         "region": "namangan",
                         "group_chat_id": 100,
                         "photo_msg_ids": [21],
@@ -227,12 +228,13 @@ class ArchiveAlbumTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(bot.sent, [])
                 self.assertTrue(message.replies)
 
-    async def test_archive_guard_rejects_brand(self):
-        context = self.context()
-        key = self.register(context, kind="brand", media_albums=albums())
-        record = context.bot_data["applications"][key]
-        self.assertFalse(await operator._archive_application(context.bot, record, "-300"))
-        self.assertEqual(context.bot.groups, [])
+    async def test_archive_guard_rejects_brand_and_spectre(self):
+        for kind in ("brand", "spectre"):
+            context = self.context()
+            key = self.register(context, kind=kind, media_albums=albums())
+            record = context.bot_data["applications"][key]
+            self.assertFalse(await operator._archive_application(context.bot, record, "-300"))
+            self.assertEqual(context.bot.groups, [])
 
 
 if __name__ == "__main__":

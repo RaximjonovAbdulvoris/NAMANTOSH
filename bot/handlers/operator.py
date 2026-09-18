@@ -206,8 +206,8 @@ def _old_reply_keyboard(group_chat_id: int) -> InlineKeyboardMarkup:
 
 async def _archive_application(bot, record: dict, destination: str) -> bool:
     """Serialize archive attempts for one source application in this process."""
-    if record.get("kind") == "brand":
-        logger.warning("archive: refusing brand application")
+    if record.get("kind") in ("brand", "spectre"):
+        logger.warning("archive: refusing brand/Spectre application")
         return False
     key = _application_key(record["group_chat_id"], record["kb_msg_id"])
     if key in _ARCHIVES_IN_FLIGHT:
@@ -519,13 +519,13 @@ async def on_operator_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ):
             resolved = (link_key, record)
 
-    if resolved is not None and resolved[1].get("kind") == "brand":
+    if resolved is not None and resolved[1].get("kind") in ("brand", "spectre"):
         try:
             await query.edit_message_reply_markup(reply_markup=None)
         except Exception as error:
-            logger.warning("brand callback: could not remove old keyboard: %s", error)
+            logger.warning("plain application: could not remove old keyboard: %s", error)
         await query.message.reply_text(
-            "⚠️ Brend arizalari bu tugmalar orqali arxivlanmaydi."
+            "Brend va Spectre arizalarida operator tugmalari va arxivlash o‘chirilgan."
         )
         return
 
@@ -686,6 +686,11 @@ async def on_operator_text_in_group(update: Update, context: ContextTypes.DEFAUL
     record = _record_for_key(context, record_key)
     if record is None or int(record.get("group_chat_id", 0)) != int(chat.id):
         return
+    if record.get("kind") in ("brand", "spectre"):
+        context.bot_data.get("pending_comments", {}).pop(pending_key, None)
+        context.bot_data.get("pending_prompts", {}).pop(pending_key, None)
+        await msg.reply_text("Bu ariza turi uchun operator izohlari o‘chirilgan.")
+        return
     text = msg.text.strip()
     if text.lower() in ("/bekor", "bekor"):
         context.bot_data.get("pending_comments", {}).pop(pending_key, None)
@@ -781,6 +786,14 @@ async def on_user_reply_button(update: Update, context: ContextTypes.DEFAULT_TYP
             return
         key, record = matches[0]
 
+    if record.get("kind") in ("brand", "spectre"):
+        context.bot_data.get("pending_user_replies", {}).pop(user.id, None)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            logger.warning("Could not remove obsolete reply keyboard.")
+        await query.message.reply_text("Bu ariza bo‘yicha bot orqali yozishma o‘chirilgan.")
+        return
     context.bot_data.setdefault("pending_user_replies", {})[user.id] = key
     await query.message.reply_text(
         f"✏️ Javobingizni yozing ({h(_branch(record))}):\n\nBekor qilish uchun: /bekor"
@@ -798,7 +811,11 @@ async def on_user_reply_message(update: Update, context: ContextTypes.DEFAULT_TY
     if record_key is None:
         return
     record = _record_for_key(context, record_key)
-    if record is None or int(record.get("applicant_id", -1)) != int(user.id):
+    if (
+        record is None
+        or int(record.get("applicant_id", -1)) != int(user.id)
+        or record.get("kind") in ("brand", "spectre")
+    ):
         pending.pop(user.id, None)
         await msg.reply_text(
             "Bu ariza bo‘yicha yozishma yopilgan. Davom etish uchun menyudan bo‘lim tanlang."

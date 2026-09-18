@@ -17,7 +17,6 @@ from telegram.ext import (
     filters,
 )
 
-from bot.handlers.operator import build_operator_keyboard, register_application
 from bot.handlers.start import (
     MENU_BRAND,
     MENU_SPECTRE,
@@ -297,26 +296,13 @@ async def brand_get_plate(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"🔢 Davlat raqami: {h(data['b_plate'])}"
     )
     try:
-        sent = await context.bot.send_message(
+        await context.bot.send_message(
             chat_id=group_id,
             text=text,
             parse_mode=ParseMode.HTML,
-            reply_markup=build_operator_keyboard(user.id) if kind == "spectre" else None,
+            reply_markup=None,
         )
-        # Brand applications stay in the brand group as plain information.
-        # Spectre is a separate workflow and retains its existing controls.
-        if kind == "spectre":
-            register_application(
-                context,
-                applicant_id=user.id,
-                region=region,
-                kind=kind,
-                group_chat_id=group_id,
-                photo_msg_ids=[],
-                kb_msg_id=sent.message_id,
-                applicant_name=data.get("b_name", ""),
-                username=user.username or "",
-            )
+        # Brand and Spectre stay in their destination groups as plain messages.
     except Exception as error:
         logger.exception("brand: arizani guruhga yuborib bo‘lmadi: %s", error)
         clear_application(context)

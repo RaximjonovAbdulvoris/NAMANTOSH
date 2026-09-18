@@ -144,14 +144,9 @@ class RegionalTests(unittest.IsolatedAsyncioTestCase):
                 ):
                     await handler(update(answer), ctx)
                 self.assertEqual(str(ctx.bot.send_message.call_args.kwargs["chat_id"]), destination)
-                if kind == "brand":
-                    self.assertIsNone(ctx.bot.send_message.call_args.kwargs["reply_markup"])
-                    self.assertFalse(ctx.bot_data.get("applications"))
-                    self.assertFalse(ctx.bot_data.get("app_messages"))
-                else:
-                    self.assertIsNotNone(ctx.bot.send_message.call_args.kwargs["reply_markup"])
-                    record = next(iter(ctx.bot_data["applications"].values()))
-                    self.assertEqual((record["region"], record["kind"]), (region, kind))
+                self.assertIsNone(ctx.bot.send_message.call_args.kwargs["reply_markup"])
+                self.assertFalse(ctx.bot_data.get("applications"))
+                self.assertFalse(ctx.bot_data.get("app_messages"))
                 self.assertEqual(ctx.user_data, {"region": region})
 
     async def test_driver_routes_and_registers_separate_branch(self):

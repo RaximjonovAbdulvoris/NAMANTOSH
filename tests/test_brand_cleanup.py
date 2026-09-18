@@ -17,8 +17,12 @@ class BrandCleanupTests(unittest.IsolatedAsyncioTestCase):
         )
         await remove_legacy_brand_keyboards(app)
         await remove_legacy_brand_keyboards(app)
-        app.bot.edit_message_reply_markup.assert_awaited_once_with(
+        self.assertEqual(app.bot.edit_message_reply_markup.await_count, 2)
+        app.bot.edit_message_reply_markup.assert_any_await(
             chat_id=-101, message_id=10, reply_markup=None,
+        )
+        app.bot.edit_message_reply_markup.assert_any_await(
+            chat_id=-102, message_id=11, reply_markup=None,
         )
         self.assertEqual(len(app.bot_data["applications"]), 3)
 
