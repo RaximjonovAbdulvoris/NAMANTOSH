@@ -9,6 +9,8 @@ local network slowness.
 """
 import logging
 import os
+from hashlib import sha256
+from io import BytesIO
 
 from telegram.ext import Application
 
@@ -40,25 +42,36 @@ async def warmup_templates(app: Application) -> None:
 
     warmup_chat = DRIVER_GROUPS[0]
     cache: dict[str, str] = app.bot_data.setdefault("template_file_ids", {})
+    hashes: dict[str, str] = app.bot_data.setdefault("template_file_hashes", {})
 
     for name in TEMPLATE_NAMES:
-        if name in cache:
-            continue
         path = template_path(name)
         if not path or not os.path.exists(path):
             logger.warning("warmup: template '%s' not found, skipping", name)
             continue
+
+        with open(path, "rb") as template_file:
+            data = template_file.read()
+        file_hash = sha256(data).hexdigest()
+        if cache.get(name) and hashes.get(name) == file_hash:
+            continue
+
+        # Do not let a persisted file_id for an older image survive a change.
+        cache.pop(name, None)
+        hashes.pop(name, None)
         try:
-            with open(path, "rb") as f:
-                msg = await app.bot.send_photo(
-                    chat_id=warmup_chat,
-                    photo=f,
-                    caption="🔄 _warmup_",
-                    parse_mode="Markdown",
-                    disable_notification=True,
-                )
+            upload = BytesIO(data)
+            upload.name = os.path.basename(path)
+            msg = await app.bot.send_photo(
+                chat_id=warmup_chat,
+                photo=upload,
+                caption="🔄 _warmup_",
+                parse_mode="Markdown",
+                disable_notification=True,
+            )
             if msg and msg.photo:
                 cache[name] = msg.photo[-1].file_id
+                hashes[name] = file_hash
                 logger.info("warmup: '%s' cached", name)
             # Try to delete the warmup message — if it fails, no big deal
             try:
