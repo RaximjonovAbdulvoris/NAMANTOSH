@@ -8,6 +8,11 @@ from telegram.ext import CallbackQueryHandler, ContextTypes, ConversationHandler
 from bot.regions import (
     NAMANGAN, TASHKENT, REGION_NAMES, clear_application, get_region, region_name,
 )
+from bot.subscription import (
+    NAMANGAN_REQUIRED_CHATS,
+    are_subscribed,
+    subscription_keyboard,
+)
 
 MENU_DRIVER = "📝 Ulanish uchun Ariza"
 MENU_BRAND = "🎨 Brend Ariza"
@@ -107,6 +112,40 @@ async def on_region_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not query or update.effective_chat.type != "private":
         return ConversationHandler.END
     parts = (query.data or "").split(":")
+    if len(parts) == 4 and parts[:3] == ["region", "namangan", "subscription"]:
+        nonce = parts[3]
+        if (
+            get_region(context) != NAMANGAN
+            or context.user_data.get("namangan_subscription_nonce") != nonce
+        ):
+            await query.answer(
+                "Bu obuna tekshiruvi eskirgan. /start orqali qayta boshlang.",
+                show_alert=True,
+            )
+            return ConversationHandler.END
+        joined = await are_subscribed(
+            context.bot, update.effective_user.id, NAMANGAN_REQUIRED_CHATS
+        )
+        if joined is None:
+            await query.answer(
+                "Obunani tekshirib bo‘lmadi. Birozdan keyin qayta urinib ko‘ring.",
+                show_alert=True,
+            )
+            return ConversationHandler.END
+        if not joined:
+            await query.answer(
+                "Avval WB HUMO kanaliga va Namangan guruhiga obuna bo‘ling.",
+                show_alert=True,
+            )
+            return ConversationHandler.END
+        context.user_data.pop("namangan_subscription_nonce", None)
+        await query.answer()
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await show_menu(update, context)
+        return ConversationHandler.END
     if (len(parts) != 4 or parts[2] not in REGION_NAMES
             or parts[3] != context.user_data.get("region_choice_nonce")):
         await query.answer("Bu tanlov eskirgan. Hududni almashtirish uchun /start bosing.", show_alert=True)
@@ -136,6 +175,19 @@ async def on_region_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         context.user_data.clear()
         context.user_data["region"] = region
         await query.answer()
+        if region == NAMANGAN:
+            context.user_data["namangan_subscription_nonce"] = nonce
+            await query.edit_message_text(
+                f"✅ {region_name(region)} tanlandi.\n\n"
+                "Namangan bo‘yicha ariza yuborish uchun avval quyidagi "
+                "kanal va guruhga obuna bo‘ling:",
+                parse_mode="HTML",
+                reply_markup=subscription_keyboard(
+                    f"region:namangan:subscription:{nonce}",
+                    NAMANGAN_REQUIRED_CHATS,
+                ),
+            )
+            return ConversationHandler.END
         await query.edit_message_text(f"✅ Tanlandi: {region_name(region)}")
         await show_menu(update, context)
     else:
