@@ -9,27 +9,63 @@ logger = logging.getLogger(__name__)
 
 REQUIRED_CHANNEL = "@WB_HUMO_TAXI"
 CHANNEL_URL = "https://t.me/WB_HUMO_TAXI"
+NAMANGAN_GROUP = "@wbhumo_namangan"
+NAMANGAN_GROUP_URL = "https://t.me/wbhumo_namangan"
+
+DEFAULT_REQUIRED_CHATS = (
+    (REQUIRED_CHANNEL, CHANNEL_URL, "Kanalga obuna bo‘lish"),
+)
+NAMANGAN_REQUIRED_CHATS = (
+    *DEFAULT_REQUIRED_CHATS,
+    (NAMANGAN_GROUP, NAMANGAN_GROUP_URL, "Namangan guruhiga qo‘shilish"),
+)
 
 
-def subscription_keyboard(callback_data: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Kanalga obuna bo‘lish", url=CHANNEL_URL)],
-        [InlineKeyboardButton("✅ Tekshirish", callback_data=callback_data)],
+def subscription_keyboard(
+    callback_data: str,
+    required_chats=DEFAULT_REQUIRED_CHATS,
+) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(label, url=url)]
+        for _, url, label in required_chats
+    ]
+    buttons.append([
+        InlineKeyboardButton("✅ Tekshirish", callback_data=callback_data)
     ])
+    return InlineKeyboardMarkup(buttons)
 
 
-async def is_subscribed(bot, user_id: int) -> bool | None:
+def required_chats_for_region(region: str | None):
+    if region == "namangan":
+        return NAMANGAN_REQUIRED_CHATS
+    return DEFAULT_REQUIRED_CHATS
+
+
+async def is_subscribed(
+    bot, user_id: int, chat_id: str = REQUIRED_CHANNEL
+) -> bool | None:
     """Return True/False, or None when Telegram could not check membership."""
     try:
         member = await bot.get_chat_member(
-            chat_id=REQUIRED_CHANNEL, user_id=user_id
+            chat_id=chat_id, user_id=user_id
         )
     except TelegramError:
-        logger.warning("Required channel membership check failed")
+        logger.warning("Required chat membership check failed: %s", chat_id)
         return None
     return member.status in ("creator", "administrator", "member") or (
         member.status == "restricted" and member.is_member
     )
+
+
+async def are_subscribed(bot, user_id: int, required_chats) -> bool | None:
+    """Return True only when the user belongs to every required chat."""
+    for chat_id, _, _ in required_chats:
+        joined = await is_subscribed(bot, user_id, chat_id)
+        if joined is None:
+            return None
+        if not joined:
+            return False
+    return True
 
 
 async def require_subscription(
@@ -46,9 +82,17 @@ async def require_subscription(
     to return when it is not yet satisfied.
     """
     user = update.effective_user
-    joined = await is_subscribed(context.bot, user.id)
-    keyboard = subscription_keyboard(callback_data)
+    required_chats = required_chats_for_region(
+        context.user_data.get("region")
+    )
+    joined = await are_subscribed(context.bot, user.id, required_chats)
+    keyboard = subscription_keyboard(callback_data, required_chats)
     message = update.effective_message
+    required_label = (
+        "WB HUMO kanaliga va Namangan guruhiga"
+        if len(required_chats) > 1
+        else "WB HUMO kanaliga"
+    )
 
     if joined is None:
         if update.callback_query:
@@ -65,14 +109,14 @@ async def require_subscription(
         query = update.callback_query
         if query:
             await query.answer(
-                "Iltimos, avval WB HUMO kanaliga obuna bo‘ling.",
+                f"Iltimos, avval {required_label} obuna bo‘ling.",
                 show_alert=True,
             )
         else:
             await message.reply_text(
-                "📢 <b>Ariza yuborish uchun avval WB HUMO kanaliga "
+                f"📢 <b>Ariza yuborish uchun avval {required_label} "
                 "obuna bo‘ling.</b>\n\n"
-                "1️⃣ «Kanalga obuna bo‘lish» tugmasini bosing.\n"
+                "1️⃣ Yuqoridagi obuna tugmalarini bosing.\n"
                 "2️⃣ Botga qaytib, «✅ Tekshirish»ni bosing.",
                 parse_mode="HTML",
                 reply_markup=keyboard,
