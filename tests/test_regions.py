@@ -84,6 +84,60 @@ class RegionalTests(unittest.IsolatedAsyncioTestCase):
         await start.on_region_choice(callback(f"region:confirm:namangan:{nonce}"), ctx)
         self.assertEqual(regions.get_region(ctx), "tashkent")
 
+    async def test_namangan_requires_channel_and_group_before_menu(self):
+        ctx = context()
+        await start.start(update(), ctx)
+        nonce = ctx.user_data["region_choice_nonce"]
+        await start.on_region_choice(
+            callback(f"region:pick:namangan:{nonce}"), ctx
+        )
+        await start.on_region_choice(
+            callback(f"region:confirm:namangan:{nonce}"), ctx
+        )
+
+        self.assertEqual(ctx.user_data["namangan_subscription_nonce"], nonce)
+        ctx.bot.get_chat_member.assert_not_awaited()
+
+        ctx.bot.get_chat_member.reset_mock()
+        ctx.bot.get_chat_member.side_effect = [
+            N(status="member"),
+            N(status="left"),
+        ]
+        check = callback(f"region:namangan:subscription:{nonce}")
+        await start.on_region_choice(check, ctx)
+        self.assertEqual(
+            [call.kwargs["chat_id"] for call in ctx.bot.get_chat_member.call_args_list],
+            [subscription.REQUIRED_CHANNEL, subscription.NAMANGAN_GROUP],
+        )
+        check.callback_query.answer.assert_awaited()
+        self.assertIn("obuna", check.callback_query.answer.await_args.args[0])
+
+    async def test_namangan_subscription_check_opens_menu_after_both_joined(self):
+        ctx = context()
+        await start.start(update(), ctx)
+        nonce = ctx.user_data["region_choice_nonce"]
+        await start.on_region_choice(
+            callback(f"region:pick:namangan:{nonce}"), ctx
+        )
+        await start.on_region_choice(
+            callback(f"region:confirm:namangan:{nonce}"), ctx
+        )
+
+        check = callback(f"region:namangan:subscription:{nonce}")
+        await start.on_region_choice(check, ctx)
+
+        self.assertEqual(
+            [call.kwargs["chat_id"] for call in ctx.bot.get_chat_member.call_args_list],
+            [subscription.REQUIRED_CHANNEL, subscription.NAMANGAN_GROUP],
+        )
+        check.callback_query.edit_message_reply_markup.assert_awaited_once_with(
+            reply_markup=None
+        )
+        self.assertIn(
+            "Namangan shahri",
+            check.message.reply_text.await_args.args[0],
+        )
+
     async def test_back_and_switch_discard_unconfirmed_or_partial_form(self):
         ctx = context("namangan")
         ctx.user_data["name"] = "Old form"
