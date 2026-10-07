@@ -7,8 +7,8 @@ from telegram.error import TelegramError
 
 logger = logging.getLogger(__name__)
 
-REQUIRED_CHANNEL = "@WB_HUMO_TAXI"
-CHANNEL_URL = "https://t.me/WB_HUMO_TAXI"
+REQUIRED_CHANNEL = "https://t.me/+knRCQZnC9UphNjky"
+CHANNEL_URL = "https://t.me/+knRCQZnC9UphNjky"
 NAMANGAN_GROUP = "@wbhumo_namangan"
 NAMANGAN_GROUP_URL = "https://t.me/wbhumo_namangan"
 
