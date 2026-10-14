@@ -88,7 +88,6 @@ async def handle(context, query, key, record, action, operator_id, keyboard):
                 await query.edit_message_reply_markup(reply_markup=confirmation_keyboard(applicant))
                 record["delete_confirmation"] = operator_id
                 await save(context)
-                await query.message.reply_text("Arizani barcha rasmlari bilan o'chirishni tasdiqlaysizmi?")
                 return True
             if record.get("delete_confirmation") != operator_id:
                 await query.message.reply_text("Tasdiqlashni o'chirishni boshlagan operator bajarishi kerak.")

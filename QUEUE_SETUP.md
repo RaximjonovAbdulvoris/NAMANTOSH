@@ -10,8 +10,8 @@ guruhlari kerak. Arxiv manzillari avvalgidek: Namangan uchun ARCHIVE_GROUP,
 Toshkent uchun TASHKENT_ARCHIVE_GROUP. Mavjud bot_routes.json ichidagi
 sozlama environment qiymatidan ustun turadi.
 
-Maxsus guruhda Tayyor, O'chirish, Jarayonda tugmalari bor. O'chirish avval
-"Arizani barcha rasmlari bilan o'chirishni tasdiqlaysizmi?" deb so'raydi.
+Maxsus guruhda Tayyor, O'chirish, Jarayonda tugmalari bor. O'chirish bosilganda alohida savol xabari yuborilmaydi.
+Faqat Ha, o'chirish va Bekor qilish tugmalari ko'rsatiladi.
 Ha, o'chirish yoki Bekor qilish tugmasini o'chirishni boshlagan operator
 bosadi. Bekor qilish avvalgi tugmalar va Jarayonda rangini qaytaradi.
 Tasdiqsiz hech narsa o'chirilmaydi. O'chirish arxivga yubormaydi.
