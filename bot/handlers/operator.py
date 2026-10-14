@@ -26,27 +26,17 @@ READY_TEXT = (
 )
 
 
-def build_operator_keyboard(
-    applicant_user_id: int, in_progress: bool = False
-) -> InlineKeyboardMarkup:
-    """The original keyboard contract used by the existing form workers."""
-    progress_btn = InlineKeyboardButton(
-        "Jarayonda🟡" if in_progress else "Jarayonda🔴",
-        callback_data=f"op:progress:{applicant_user_id}",
-    )
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    "✅ Tayyor", callback_data=f"op:ready:{applicant_user_id}"
-                ),
-                InlineKeyboardButton(
-                    "💬 Izoh berish", callback_data=f"op:comment:{applicant_user_id}"
-                ),
-            ],
-            [progress_btn],
-        ]
-    )
+def build_operator_keyboard(applicant_user_id: int, in_progress: bool = False, stage: str = "main") -> InlineKeyboardMarkup:
+    def button(text, action):
+        return InlineKeyboardButton(text, callback_data=f"op:{action}:{applicant_user_id}")
+    rows = [[button("✅ Tayyor", "ready")]]
+    if stage == "main":
+        rows[0].append(button("💬 Izoh berish", "comment"))
+        rows.append([button("📷 Chala rasm", "incomplete"), button("🚕 Boshqa park", "other")])
+    else:
+        rows[0].append(button("🗑 O'chirish", "delete"))
+    rows.append([button("Jarayonda🟡" if in_progress else "Jarayonda🔴", "progress")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _comment_only_keyboard(applicant_user_id: int) -> InlineKeyboardMarkup:
@@ -143,7 +133,7 @@ def _find_application(
     """Resolve only an exact callback message, never a user's latest record."""
     key = _application_key(chat_id, kb_id)
     candidates = []
-    applications = context.bot_data.get("applications", {})
+    applications = context.bot_data.setdefault("applications", {})
     if key in applications:
         candidates.append((key, applications[key]))
 
@@ -155,9 +145,16 @@ def _find_application(
     legacy = app_messages.get(applicant_id)
     if isinstance(legacy, dict):
         normalized = _legacy_record(applicant_id, legacy)
+        app_messages[applicant_id] = normalized
         candidates.append((normalized["application_key"], normalized))
 
     for candidate_key, record in candidates:
+        if isinstance(record, dict) and record.get("queue_cleanup"):
+            source = record["queue_cleanup"]
+            if (str(source["group_chat_id"]) == str(chat_id)
+                    and source["kb_msg_id"] == kb_id
+                    and record.get("applicant_id") == applicant_id):
+                return record["application_key"], record
         if isinstance(record, dict) and _same_application(
             record, applicant_id, chat_id, kb_id
         ):
@@ -165,7 +162,7 @@ def _find_application(
             # idempotent even before the old worker is migrated.
             if candidate_key not in applications:
                 applications[candidate_key] = record
-            return candidate_key, record
+            return record.get("application_key", candidate_key), record
     return None
 
 
@@ -542,11 +539,24 @@ async def on_operator_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    if action in ("ready", "progress") and resolved is None:
+    if action in ("ready", "progress", "incomplete", "other", "delete", "delete_yes", "delete_cancel") and resolved is None:
         await query.message.reply_text(
             "⚠️ Bu tugma boshqa yoki eski arizaga tegishli. Ariza o‘zgartirilmadi."
         )
         return
+
+    if resolved is not None:
+        from bot.application_queues import handle
+        key, record = resolved
+        current_key = _application_key(record["group_chat_id"], record["kb_msg_id"])
+        if current_key in _ARCHIVES_IN_FLIGHT:
+            await query.message.reply_text("⏳ Ariza arxivlanmoqda, tugashini kuting.")
+            return
+        if await handle(context, query, key, record, action, operator.id, build_operator_keyboard):
+            return
+        if record.get("delete_confirmation") is not None and action != "comment":
+            await query.message.reply_text("Avval o'chirishni tasdiqlang yoki bekor qiling.")
+            return
 
     if action == "ready":
         key, record = resolved
@@ -598,35 +608,18 @@ async def on_operator_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception as error:
             logger.warning("ready: could not notify applicant %s: %s", applicant_id, error)
 
-        delete_failed = False
-        for message_id in record.get("photo_msg_ids", []):
-            try:
-                await context.bot.delete_message(
-                    chat_id=record["group_chat_id"], message_id=message_id
-                )
-            except Exception as error:
-                delete_failed = True
-                logger.warning("ready: could not delete photo %s: %s", message_id, error)
-        try:
-            await query.delete_message()
-        except Exception:
-            try:
-                await context.bot.delete_message(
-                    chat_id=record["group_chat_id"], message_id=record["kb_msg_id"]
-                )
-            except Exception:
-                delete_failed = True
-
-        if not delete_failed:
-            context.bot_data.get("applications", {}).pop(key, None)
-            # Do not remove a legacy applicant entry belonging to another
-            # application; remove only this exact identity alias.
-            context.bot_data.get("app_messages", {}).pop(key, None)
-            context.bot_data.get("progress_state", {}).pop(key, None)
-        else:
+        from bot.application_queues import cleanup, save
+        record["queue_stage"] = "archive"
+        record["queue_cleanup"] = {
+            "group_chat_id": record["group_chat_id"],
+            "photo_msg_ids": list(record.get("photo_msg_ids", [])),
+            "kb_msg_id": record["kb_msg_id"],
+        }
+        await save(context)
+        if not await cleanup(context, record):
             await query.message.reply_text(
-                "✅ Arxivlandi, ammo ayrim asl xabarlarni o‘chirishda xatolik "
-                "bo‘ldi. Ular saqlab qolindi."
+                "✅ Arxivlandi, ammo ayrim eski xabarlar o'chmadi. "
+                "Bot huquqlarini tekshirib, qayta bosing; arxivga qayta yuborilmaydi."
             )
         return
 
@@ -636,13 +629,13 @@ async def on_operator_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if progress_state.get(key, False):
             await query.answer("Jarayon allaqachon boshlangan 🟡", show_alert=False)
             return
-        progress_state[key] = True
         try:
             await query.edit_message_reply_markup(
                 reply_markup=build_operator_keyboard(
-                    applicant_id, in_progress=True
+                    applicant_id, in_progress=True, stage=record.get("queue_stage", "main")
                 )
             )
+            progress_state[key] = True
         except Exception:
             logger.warning("progress: could not update keyboard for %s", key)
         return

@@ -49,3 +49,9 @@ def archive_group(region: str) -> str:
     if region == TASHKENT:
         return destination("TASHKENT_ARCHIVE_GROUP")
     return ""
+
+def queue_group(region: str, stage: str) -> str:
+    if region not in REGION_NAMES or stage not in ("incomplete", "other"):
+        return ""
+    suffix = "CHALA_RASM_GROUP" if stage == "incomplete" else "OTHER_PARK_GROUP"
+    return destination(f"{region.upper()}_{suffix}")
