@@ -9,20 +9,10 @@ TASHKENT_KEYS = {
     "driver1": "TASHKENT_DRIVER_GROUP_1",
     "driver2": "TASHKENT_DRIVER_GROUP_2",
     "brand": "TASHKENT_BRAND_GROUP",
-    "spectre": "TASHKENT_SPECTRE_GROUP",
     "archive": "TASHKENT_ARCHIVE_GROUP",
 }
 
-NAMANGAN_KEYS = {
-    "spectre": "NAMANGAN_SPECTRE_GROUP",
-}
-
-QUEUE_KEYS = {
-    "NAMANGAN_CHALA_RASM_GROUP", "NAMANGAN_OTHER_PARK_GROUP",
-    "TASHKENT_CHALA_RASM_GROUP", "TASHKENT_OTHER_PARK_GROUP",
-}
-
-ROUTE_KEYS = {*TASHKENT_KEYS.values(), *NAMANGAN_KEYS.values(), *QUEUE_KEYS}
+ROUTE_KEYS = set(TASHKENT_KEYS.values())
 
 
 def settings_path() -> Path:
@@ -53,7 +43,9 @@ def read_settings() -> dict[str, str]:
         raise ValueError(f"{path.name} o'qilmadi; faylni tekshiring.") from exc
     if not isinstance(data, dict):
         raise ValueError(f"{path.name}: JSON obyekt bo'lishi kerak.")
-    return {key: validate(key, value) for key, value in data.items()}
+    # Ignore obsolete Spectre/queue routes in an old local settings file.
+    return {key: validate(key, value) for key, value in data.items()
+            if key in ROUTE_KEYS}
 
 
 def destination(key: str) -> str:

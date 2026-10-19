@@ -2,8 +2,6 @@ import os
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 
-CHANNEL = os.environ.get("CHANNEL", "@WB_HUMO_TAXI")
-
 DRIVER_GROUPS = [
     os.environ["DRIVER_GROUP_1"],
     os.environ["DRIVER_GROUP_2"],

@@ -58,7 +58,7 @@ async def _remove_buttons_command(update, context) -> None:
     target = getattr(message, "reply_to_message", None)
     if not target or not is_plain_application_message(target, context.bot.id):
         await message.reply_text(
-            "Bot yuborgan Spectre yoki Brend arizasiga Reply/Javob qilib /tugmasiz yuboring."
+            "Bot yuborgan eski brend arizasiga Reply/Javob qilib /tugmasiz yuboring."
         )
         return
     try:

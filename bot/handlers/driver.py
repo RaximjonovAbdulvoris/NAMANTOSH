@@ -29,7 +29,6 @@ from bot.regions import (
     get_region,
     region_name,
 )
-from bot.subscription import require_subscription, subscription_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +51,6 @@ _pending_car_progress_tasks: dict[int, asyncio.Task] = {}
     CAR_PHOTOS,
     CAR_PLATE,
 ) = range(13)
-
-JOIN_GROUP = 13
-REQUIRED_GROUP = "@WB_HUMO_TAXI"
-JOIN_KEYBOARD = subscription_keyboard("driver:check_membership")
 
 CONTINUE_BTN = "✅ Davom etish"
 CONTINUE_KB = ReplyKeyboardMarkup(
@@ -144,12 +139,11 @@ async def start_driver(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         )
         clear_application(context)
         return ConversationHandler.END
-    return await check_membership(update, context)
+    return await begin_driver(update, context)
 
 
-async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # Membership may be checked long after the menu was opened.  Revalidate
-    # the branch and destination before accepting the first form answer.
+async def begin_driver(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    # Recheck the destination immediately before collecting the first answer.
     if not await _require_region(update, context):
         return ConversationHandler.END
     region = _region_required(context)
@@ -162,17 +156,12 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         clear_application(context)
         return ConversationHandler.END
-    if not await require_subscription(
-        update, context, callback_data="driver:check_membership"
-    ):
-        return JOIN_GROUP
-
     # Keep the confirmed region while discarding any stale form data.
     clear_application(context)
     context.user_data["_application_kind"] = "driver"
     context.user_data["_application_region"] = region
     await update.effective_message.reply_text(
-        f"📝 *{region_name(region)} — haydovchilik arizasi*\n\n"
+        f"📝 *TURON TAXI · {region_name(region)}*\n\n"
         "Iltimos, *ism va familiyangizni* yozing:",
         parse_mode="Markdown",
         reply_markup=ReplyKeyboardRemove(),
@@ -530,9 +519,9 @@ async def get_car_plate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return ConversationHandler.END
 
     await update.message.reply_text(
-        "🎉 *Tabriklaymiz!*\n\n"
-        f"{region_name(_region_required(context))} haydovchilik arizangiz qabul qilindi. "
-        "Tez orada operatorlarimiz siz bilan bog‘lanadi.",
+        "✅ *Arizangiz qabul qilindi!*\n\n"
+        f"{region_name(_region_required(context))} bo‘yicha ma’lumotlaringiz operatorlarga yuborildi. "
+        "Zarur bo‘lsa siz bilan bog‘lanamiz.",
         parse_mode="Markdown",
         reply_markup=_regional_keyboard(context),
     )
@@ -573,7 +562,7 @@ async def _send_to_driver_group(context: ContextTypes.DEFAULT_TYPE):
     )
 
     caption_main = (
-        f"📝 <b>{h(region_name(region))} — YANGI ARIZA</b>\n\n"
+        f"📝 <b>TURON TAXI · {h(region_name(region))} — HAYDOVCHI ARIZASI</b>\n\n"
         f"👤 Foydalanuvchi: {user_link_html}\n"
         f"🪪 Ism familiya: {h(d.get('name', '-'))}\n"
         f"📞 Tel: {h(d.get('phone', '-'))}\n"
@@ -709,12 +698,6 @@ def build_driver_conversation() -> ConversationHandler:
             ),
         ],
         states={
-            JOIN_GROUP: [
-                CallbackQueryHandler(
-                    check_membership, pattern=r"^driver:check_membership$",
-                ),
-                MessageHandler(~filters.COMMAND, check_membership),
-            ],
             NAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_name),
                 MessageHandler(~filters.COMMAND, name_wrong),

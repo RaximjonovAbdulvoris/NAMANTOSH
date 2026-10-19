@@ -35,11 +35,8 @@ def driver_groups(region: str) -> list[str]:
 def application_group(region: str, kind: str) -> str:
     if region == NAMANGAN and kind == "brand":
         return BRAND_GROUP
-    if region == NAMANGAN and kind == "spectre":
-        return destination("NAMANGAN_SPECTRE_GROUP")
-    if region == TASHKENT and kind in ("brand", "spectre"):
-        key = "TASHKENT_BRAND_GROUP" if kind == "brand" else "TASHKENT_SPECTRE_GROUP"
-        return destination(key)
+    if region == TASHKENT and kind == "brand":
+        return destination("TASHKENT_BRAND_GROUP")
     return ""
 
 
@@ -49,9 +46,3 @@ def archive_group(region: str) -> str:
     if region == TASHKENT:
         return destination("TASHKENT_ARCHIVE_GROUP")
     return ""
-
-def queue_group(region: str, stage: str) -> str:
-    if region not in REGION_NAMES or stage not in ("incomplete", "other"):
-        return ""
-    suffix = "CHALA_RASM_GROUP" if stage == "incomplete" else "OTHER_PARK_GROUP"
-    return destination(f"{region.upper()}_{suffix}")

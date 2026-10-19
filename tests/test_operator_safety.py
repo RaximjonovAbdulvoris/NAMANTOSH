@@ -2,7 +2,7 @@ import os
 import asyncio
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 for _key, _value in {
     "TELEGRAM_BOT_TOKEN": "test-token",
@@ -108,6 +108,26 @@ def _update(data, message, user_id=9, chat_id=None):
 
 
 class OperatorSafetyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ready_cleanup_retry_never_copies_twice(self):
+        class DeleteOnceBot(FakeBot):
+            async def delete_message(self, **kwargs):
+                if kwargs['message_id'] == 21 and not getattr(self, 'failed_once', False):
+                    self.failed_once = True
+                    raise RuntimeError('temporary delete failure')
+                await super().delete_message(**kwargs)
+
+        bot = DeleteOnceBot()
+        context = self._context(bot)
+        key = self._register(context, 9, 'namangan', 100, 20)
+        message = FakeMessage(20, 100)
+        with patch.object(operator, 'archive_group', return_value='-300'):
+            await operator.on_operator_button(_update('op:ready:9', message), context)
+            self.assertEqual(context.bot_data['applications'][key]['queue_stage'], 'archive')
+            await operator.on_operator_button(_update('op:ready:9', message), context)
+        self.assertEqual(len(bot.batch_copies), 1)
+        self.assertEqual(len(bot.copies), 1)
+        self.assertNotIn(key, context.bot_data['applications'])
+
     async def test_archive_retry_does_not_duplicate_successful_copies(self):
         context = self._context(FakeBot(fail_ids=[20]))
         key = operator.register_application(
@@ -246,7 +266,8 @@ class OperatorSafetyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("o‘chirilmadi" in text for text in message.replies))
 
     def _context(self, bot=None):
-        return SimpleNamespace(bot_data={}, bot=bot or FakeBot())
+        return SimpleNamespace(bot_data={}, bot=bot or FakeBot(),
+            application=SimpleNamespace(update_persistence=AsyncMock(), persistence=None))
 
     def _register(self, context, applicant, region, group, kb, kind="driver"):
         return operator.register_application(

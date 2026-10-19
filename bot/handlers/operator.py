@@ -9,6 +9,7 @@ import logging
 from html import escape as h
 
 from telegram import InputMediaPhoto, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import BadRequest
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from bot.regions import archive_group, region_name
@@ -21,20 +22,15 @@ logger = logging.getLogger(__name__)
 _ARCHIVES_IN_FLIGHT: set[tuple[int, int]] = set()
 
 READY_TEXT = (
-    "✅ <b>WB HUMO arizangiz muvaffaqiyatli qabul qilindi!</b>\n\n"
-    "📞 Tez orada operatorlarimiz siz bilan bog‘lanishadi."
+    "✅ <b>TURON TAXI arizangiz ko‘rib chiqildi.</b>\n\n"
+    "Operatorlarimiz zarur bo‘lsa siz bilan bog‘lanadi."
 )
 
 
 def build_operator_keyboard(applicant_user_id: int, in_progress: bool = False, stage: str = "main") -> InlineKeyboardMarkup:
     def button(text, action):
         return InlineKeyboardButton(text, callback_data=f"op:{action}:{applicant_user_id}")
-    rows = [[button("✅ Tayyor", "ready")]]
-    if stage == "main":
-        rows[0].append(button("💬 Izoh berish", "comment"))
-        rows.append([button("📷 Chala rasm", "incomplete"), button("🚕 Boshqa park", "other")])
-    else:
-        rows[0].append(button("🗑 O'chirish", "delete"))
+    rows = [[button("✅ Tayyor", "ready"), button("💬 Izoh berish", "comment")]]
     rows.append([button("Jarayonda🟡" if in_progress else "Jarayonda🔴", "progress")])
     return InlineKeyboardMarkup(rows)
 
@@ -52,6 +48,56 @@ def _comment_only_keyboard(applicant_user_id: int) -> InlineKeyboardMarkup:
 
 def _application_key(group_chat_id: int, kb_msg_id: int) -> tuple[int, int]:
     return int(group_chat_id), int(kb_msg_id)
+
+
+async def _finish_archived_application(context, record: dict, query) -> None:
+    """Remember the archive first, then remove source messages without recopying."""
+    if not record.get("queue_cleanup"):
+        record["queue_stage"] = "archive"
+        record["queue_cleanup"] = {
+            "group_chat_id": record["group_chat_id"],
+            "photo_msg_ids": list(record.get("photo_msg_ids", [])),
+            "kb_msg_id": record["kb_msg_id"],
+        }
+        await context.application.update_persistence()
+        if context.application.persistence:
+            await context.application.persistence.flush()
+    pending = record["queue_cleanup"]
+    remaining = []
+    for message_id in pending["photo_msg_ids"]:
+        try:
+            await context.bot.delete_message(chat_id=pending["group_chat_id"], message_id=message_id)
+        except BadRequest as error:
+            if "message to delete not found" not in str(error).lower():
+                remaining.append(message_id)
+        except Exception:
+            remaining.append(message_id)
+    pending["photo_msg_ids"] = remaining
+    keyboard_pending = False
+    if not remaining:
+        try:
+            await context.bot.delete_message(chat_id=pending["group_chat_id"], message_id=pending["kb_msg_id"])
+        except BadRequest as error:
+            if "message to delete not found" not in str(error).lower():
+                keyboard_pending = True
+        except Exception:
+            keyboard_pending = True
+    if remaining or keyboard_pending:
+        await query.message.reply_text(
+            "✅ Arxivlandi, ammo ayrim eski xabarlar o‘chmadi. Botning o‘chirish huquqini "
+            "tekshirib, «Tayyor»ni qayta bosing; arxivga qayta yuborilmaydi."
+        )
+    else:
+        key = record["application_key"]
+        for name in ("applications", "app_messages"):
+            store = context.bot_data.get(name, {})
+            for item, value in list(store.items()):
+                if value is record:
+                    store.pop(item, None)
+        context.bot_data.get("progress_state", {}).pop(key, None)
+    await context.application.update_persistence()
+    if context.application.persistence:
+        await context.application.persistence.flush()
 
 
 def register_application(
@@ -510,7 +556,7 @@ async def on_operator_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception:
             logger.warning("Could not remove untracked plain-application keyboard.")
         await query.message.reply_text(
-            "Spectre va Brend arizalarida operator tugmalari o‘chirilgan; ariza arxivlanmadi."
+            "Bu eski turdagi arizada operator tugmalari ishlamaydi; ariza arxivlanmadi."
         )
         return
 
@@ -535,27 +581,30 @@ async def on_operator_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception as error:
             logger.warning("plain application: could not remove old keyboard: %s", error)
         await query.message.reply_text(
-            "Brend va Spectre arizalarida operator tugmalari va arxivlash o‘chirilgan."
+            "Bu turdagi arizada operator tugmalari va arxivlash mavjud emas."
         )
         return
 
-    if action in ("ready", "progress", "incomplete", "other", "delete", "delete_yes", "delete_cancel") and resolved is None:
+    if action not in ("ready", "progress", "comment"):
+        await query.answer("Bu amal Turon botida mavjud emas.", show_alert=True)
+        return
+    if action in ("ready", "progress") and resolved is None:
         await query.message.reply_text(
             "⚠️ Bu tugma boshqa yoki eski arizaga tegishli. Ariza o‘zgartirilmadi."
         )
         return
 
     if resolved is not None:
-        from bot.application_queues import handle
         key, record = resolved
         current_key = _application_key(record["group_chat_id"], record["kb_msg_id"])
+        if record.get("queue_stage") == "archive":
+            await _finish_archived_application(context, record, query)
+            return
+        if record.get("queue_stage", "main") != "main":
+            await query.message.reply_text("Bu eski ariza maxsus guruhga o‘tkazilgan; yangi amal bajarilmadi.")
+            return
         if current_key in _ARCHIVES_IN_FLIGHT:
             await query.message.reply_text("⏳ Ariza arxivlanmoqda, tugashini kuting.")
-            return
-        if await handle(context, query, key, record, action, operator.id, build_operator_keyboard):
-            return
-        if record.get("delete_confirmation") is not None and action != "comment":
-            await query.message.reply_text("Avval o'chirishni tasdiqlang yoki bekor qiling.")
             return
 
     if action == "ready":
@@ -608,34 +657,20 @@ async def on_operator_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception as error:
             logger.warning("ready: could not notify applicant %s: %s", applicant_id, error)
 
-        from bot.application_queues import cleanup, save
-        record["queue_stage"] = "archive"
-        record["queue_cleanup"] = {
-            "group_chat_id": record["group_chat_id"],
-            "photo_msg_ids": list(record.get("photo_msg_ids", [])),
-            "kb_msg_id": record["kb_msg_id"],
-        }
-        await save(context)
-        if not await cleanup(context, record):
-            await query.message.reply_text(
-                "✅ Arxivlandi, ammo ayrim eski xabarlar o'chmadi. "
-                "Bot huquqlarini tekshirib, qayta bosing; arxivga qayta yuborilmaydi."
-            )
+        await _finish_archived_application(context, record, query)
         return
 
     if action == "progress":
         key, record = resolved
         progress_state = context.bot_data.setdefault("progress_state", {})
-        if progress_state.get(key, False):
-            await query.answer("Jarayon allaqachon boshlangan 🟡", show_alert=False)
-            return
+        new_progress = not progress_state.get(key, False)
         try:
             await query.edit_message_reply_markup(
                 reply_markup=build_operator_keyboard(
-                    applicant_id, in_progress=True, stage=record.get("queue_stage", "main")
+                    applicant_id, in_progress=new_progress
                 )
             )
-            progress_state[key] = True
+            progress_state[key] = new_progress
         except Exception:
             logger.warning("progress: could not update keyboard for %s", key)
         return
@@ -708,7 +743,7 @@ async def on_operator_text_in_group(update: Update, context: ContextTypes.DEFAUL
         sent = await context.bot.send_message(
             chat_id=applicant_id,
             text=(
-                f"💬 <b>WB HUMO — operator izohi</b>\n"
+                f"💬 <b>TURON TAXI — operator izohi</b>\n"
                 f"📍 <b>{h(_branch(record))}</b>\n\n{h(text)}"
             ),
             parse_mode="HTML",
